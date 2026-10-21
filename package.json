@@ -26,7 +26,8 @@
         "env:down": "tsx packages/dev-environments/environments.ts down",
         "env:tailscale": "tsx packages/dev-environments/environments.ts tailscale",
         "web:local": "node scripts/local-web/start.mjs",
-        "test:web-local": "node --test scripts/local-web/config.test.mjs"
+        "test:web-local": "node --test scripts/local-web/config.test.mjs scripts/local-web/production-config.test.mjs",
+        "web:build:selfhost": "node scripts/local-web/build-production.mjs"
     },
     "workspaces": {
         "packages": [

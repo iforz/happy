@@ -7,11 +7,15 @@ firewalls, requests certificates, or publishes the site automatically.
 2. Build the actual web client (never a harness/debug-auth bundle):
 
    ```sh
-   EXPO_NO_DOTENV=1 EXPO_NO_TELEMETRY=1 EXPO_OFFLINE=1 \
+   APP_ENV=production EXPO_NO_DOTENV=1 EXPO_NO_TELEMETRY=1 EXPO_OFFLINE=1 \
    EXPO_PUBLIC_DISABLE_ANALYTICS=1 EXPO_PUBLIC_SELF_HOSTED=1 \
    EXPO_PUBLIC_HAPPY_SERVER_URL=https://ai.iforz.cn \
    pnpm --filter happy-app exec expo export --platform web --max-workers 2
    ```
+
+   Preferred repeatable command: `pnpm web:build:selfhost`. This pins production
+   branding, the approved relay URL and analytics settings in an isolated build
+   environment. The normal `web:local` command intentionally remains development.
 
 3. Review `ai.iforz.cn.env.example`; supply a separately approved production
    master secret outside Git. The placeholder and the local-development fixture

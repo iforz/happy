@@ -361,12 +361,6 @@ export default function RootLayout() {
                 }}
             />
             <Stack.Screen
-                name="dev/masked-progress"
-                options={{
-                    headerTitle: 'Masked Progress',
-                }}
-            />
-            <Stack.Screen
                 name="dev/diff-bench"
                 options={{
                     headerTitle: 'Diff Benchmark',
