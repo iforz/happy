@@ -43,6 +43,43 @@ build a new release directory, smoke-test it before switching the proxy/service,
 and preserve the previous release for rollback. Never replace a server's existing
 applications or global Nginx configuration wholesale.
 
+## Frontend-only updates with the current static server
+
+The relay registers `@fastify/static` with `wildcard: false`. Asset routes are
+captured at process startup. Uploading newly hashed JavaScript files does NOT
+make those files available to the running process: an unregistered asset URL
+can fall through to the SPA handler and return HTML with HTTP 200. This causes
+`Unexpected token <` in the browser. HTTP 200 alone is not an asset check.
+
+Use this sequence for a frontend-only update:
+
+1. Verify the archive checksum, stage the export and back up the active index.
+   Keep the old index active and retain existing hashed assets for open tabs.
+2. Copy new assets into the active `webapp` tree WITHOUT replacing `index.html`.
+   Do not change the environment, secret, database, relay or service config.
+3. Perform one authorized, controlled Happy-service restart to register both
+   old and new asset paths. Wait for service health and `/health`. Do not
+   restart unrelated applications or the database.
+4. Before switching the index, request new JavaScript/CSS asset URLs directly,
+   including entry scripts referenced by the staged index. Verify expected MIME
+   types and bodies, not just HTTP 200. JavaScript must not return `text/html`,
+   `<!DOCTYPE`, or an HTML app shell. Also check an old asset, through both
+   loopback and public HTTPS.
+5. Only after these checks pass, atomically replace the registered `index.html`
+   path. Verify the real browser page, console, assets, deep links, `/health`
+   and the `/v1/updates` WebSocket endpoint.
+6. If checks fail, restore the previous index atomically and verify the old
+   page/assets and service health. Preserve both asset sets while diagnosing;
+   do not repeatedly restart or expand deployment scope.
+
+This restart is required for this serving mode even for frontend-only changes.
+Changing runtime routing needs separate review. The focused regression exercises
+this static-plugin behavior and guards the production configuration:
+
+```sh
+pnpm --filter happy-server exec vitest run sources/app/api/staticAssetDeployment.spec.ts
+```
+
 ## Small production artifact (build off-server)
 
 For a memory-constrained server, do not install the monorepo or run Metro/Expo
