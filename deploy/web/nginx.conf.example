@@ -1,0 +1,34 @@
+# Review existing Nginx config and certificate paths before installation.
+# Place this map in the http context, once (reuse an existing map if present).
+map $http_upgrade $happy_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+server {
+    listen 80;
+    server_name ai.iforz.cn;
+    # Preserve the server's EXISTING ACME challenge location and webroot here.
+    # Replace this placeholder with the already verified certificate webroot.
+    location ^~ /.well-known/acme-challenge/ {
+        root /REPLACE_WITH_EXISTING_ACME_WEBROOT;
+        try_files $uri =404;
+    }
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 443 ssl;
+    server_name ai.iforz.cn;
+    ssl_certificate /etc/letsencrypt/live/ai.iforz.cn/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ai.iforz.cn/privkey.pem;
+    client_max_body_size 25m;
+    location / {
+        proxy_pass http://127.0.0.1:3005;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $happy_connection_upgrade;
+        proxy_read_timeout 3600s;
+    }
+}

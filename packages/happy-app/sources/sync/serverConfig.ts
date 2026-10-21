@@ -1,4 +1,5 @@
 import { MMKV } from 'react-native-mmkv';
+import { pinnedSelfHostedServer } from './selfHostedServer';
 
 // Separate MMKV instance for server config that persists across logouts
 const serverConfigStorage = new MMKV({ id: 'server-config' });
@@ -8,7 +9,13 @@ const LOG_SERVER_KEY = 'log-server-url';
 const USE_CUSTOM_SERVER_FOR_VOICE_KEY = 'use-custom-server-for-voice';
 const DEFAULT_SERVER_URL = 'https://api.cluster-fluster.com';
 
+export function getPinnedServerUrl(): string | null {
+    return pinnedSelfHostedServer(process.env.EXPO_PUBLIC_SELF_HOSTED, process.env.EXPO_PUBLIC_HAPPY_SERVER_URL);
+}
+
 export function getServerUrl(): string {
+    const pinned = getPinnedServerUrl();
+    if (pinned) return pinned;
     // A selected private run must not silently reuse a previously persisted
     // server (including another loopback run). Production ignores this path.
     if (__DEV__ && process.env.EXPO_PUBLIC_HARNESS_MODE === '1') {
@@ -63,10 +70,13 @@ export function setUseCustomServerForVoice(enabled: boolean): void {
 }
 
 export function getVoiceServerUrl(): string {
+    const pinned = getPinnedServerUrl();
+    if (pinned) return pinned;
     return shouldUseCustomServerForVoice() ? getServerUrl() : DEFAULT_SERVER_URL;
 }
 
 export function getLogServerUrl(): string | null {
+    if (getPinnedServerUrl()) return null;
     return serverConfigStorage.getString(LOG_SERVER_KEY) ||
            process.env.EXPO_PUBLIC_LOG_SERVER_URL ||
            null;

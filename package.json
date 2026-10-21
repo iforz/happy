@@ -24,7 +24,9 @@
         "env:up": "tsx packages/dev-environments/environments.ts up",
         "env:up:authenticated": "pnpm env:up --template authenticated-empty",
         "env:down": "tsx packages/dev-environments/environments.ts down",
-        "env:tailscale": "tsx packages/dev-environments/environments.ts tailscale"
+        "env:tailscale": "tsx packages/dev-environments/environments.ts tailscale",
+        "web:local": "node scripts/local-web/start.mjs",
+        "test:web-local": "node --test scripts/local-web/config.test.mjs"
     },
     "workspaces": {
         "packages": [

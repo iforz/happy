@@ -14,6 +14,7 @@ import { layout } from '@/components/layout';
 import { t } from '@/text';
 import {
     getServerUrl,
+    getPinnedServerUrl,
     setServerUrl,
     validateServerUrl,
     getServerInfo,
@@ -89,6 +90,7 @@ export default function ServerConfigScreen() {
     const styles = stylesheet;
     const router = useRouter();
     const serverInfo = getServerInfo();
+    const pinnedServer = getPinnedServerUrl();
     const [inputUrl, setInputUrl] = useState(serverInfo.isCustom ? getServerUrl() : '');
     const [isCustomServer, setIsCustomServer] = useState(serverInfo.isCustom);
     const [useCustomServerForVoice, setUseCustomServerForVoiceState] = useState(shouldUseCustomServerForVoice());
@@ -217,7 +219,7 @@ export default function ServerConfigScreen() {
                                 autoCapitalize="none"
                                 autoCorrect={false}
                                 keyboardType="url"
-                                editable={!isValidating}
+                                editable={!isValidating && !pinnedServer}
                             />
                             {error && (
                                 <Text style={styles.errorText}>
@@ -229,7 +231,7 @@ export default function ServerConfigScreen() {
                                     {t('server.validatingServer')}
                                 </Text>
                             )}
-                            <View style={styles.buttonColumn}>
+                            {!pinnedServer && <View style={styles.buttonColumn}>
                                 <RoundButton
                                     title={isValidating ? t('server.validating') : t('common.save')}
                                     size="normal"
@@ -244,7 +246,8 @@ export default function ServerConfigScreen() {
                                         onPress={handleReset}
                                     />
                                 )}
-                            </View>
+                            </View>}
+                            {pinnedServer && <Text style={styles.statusText}>Server URL is fixed for this self-hosted build.</Text>}
                             {isCustomServer && (
                                 <Text style={styles.statusText}>
                                     {t('server.currentlyUsingCustomServer')}
@@ -253,7 +256,7 @@ export default function ServerConfigScreen() {
                         </View>
                     </ItemGroup>
 
-                    {isCustomServer && (
+                    {isCustomServer && !pinnedServer && (
                         <ItemGroup
                             title={t('server.services')}
                             footer={t('server.customServerVoiceFooter')}
