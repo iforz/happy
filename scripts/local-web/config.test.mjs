@@ -7,6 +7,7 @@ test('loopback-only defaults, isolated data and analytics off', () => {
     assert.equal(config.env.HOST, '127.0.0.1');
     assert.equal(config.env.EXPO_PUBLIC_HAPPY_SERVER_URL, 'http://127.0.0.1:3005');
     assert.equal(config.env.EXPO_PUBLIC_DISABLE_ANALYTICS, '1');
+    assert.equal(config.env.HAPPY_BUILD_TARGET, 'web');
     assert.equal(config.env.EXPO_NO_TELEMETRY, '1');
     assert.equal(config.env.HOME, '/tmp/happy-fixture/.happy-web-local/home');
 });

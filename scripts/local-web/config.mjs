@@ -30,6 +30,7 @@ export function localWebConfig(root, source = process.env) {
         EXPO_PUBLIC_HAPPY_SERVER_URL: `http://127.0.0.1:${serverPort}`,
         EXPO_PUBLIC_DISABLE_ANALYTICS: '1',
         EXPO_PUBLIC_SELF_HOSTED: '1',
+        HAPPY_BUILD_TARGET: 'web',
         EXPO_NO_TELEMETRY: '1',
         EXPO_OFFLINE: '1',
         EXPO_NO_DOTENV: '1',

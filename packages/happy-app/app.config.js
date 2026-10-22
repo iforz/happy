@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const { withSelfHostedBuildConfig } = require('./scripts/selfHostedBuildConfig.cjs');
 
 const variant = process.env.APP_ENV || 'development';
 const name = {
@@ -56,7 +57,7 @@ function loadBuildMetadata() {
 const buildMetadata = loadBuildMetadata();
 
 export default {
-    expo: {
+    expo: withSelfHostedBuildConfig({
         name,
         slug: "happy",
         version: "1.8.0",
@@ -235,5 +236,5 @@ export default {
             }
         },
         owner: "bulkacorp"
-    }
+    })
 };

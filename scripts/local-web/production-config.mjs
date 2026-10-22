@@ -14,6 +14,7 @@ export function productionWebEnvironment(root, source = process.env) {
         EXPO_NO_TELEMETRY: '1',
         EXPO_OFFLINE: '1',
         EXPO_PUBLIC_SELF_HOSTED: '1',
+        HAPPY_BUILD_TARGET: 'web',
         EXPO_PUBLIC_DISABLE_ANALYTICS: '1',
         EXPO_PUBLIC_HAPPY_SERVER_URL: 'https://ai.iforz.cn',
         CI: '1',
