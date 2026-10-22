@@ -1,3 +1,4 @@
+import { workSocketHeaders, canConnectWorkSocket } from '@/integrations/tokenhub/requestContext';
 import { io, Socket } from 'socket.io-client';
 import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
@@ -101,13 +102,14 @@ class ApiSocket {
     //
 
     connect() {
-        if (!this.config || this.socket) {
+        if (!this.config || this.socket || !canConnectWorkSocket(this.config.endpoint)) {
             return;
         }
 
         this.updateStatus('connecting');
 
         this.socket = io(this.config.endpoint, {
+            extraHeaders: workSocketHeaders(this.config.endpoint),
             path: '/v1/updates',
             // A callback, not an object literal: socket.io re-invokes it for
             // every connect AND reconnect, so appState is read fresh each time.

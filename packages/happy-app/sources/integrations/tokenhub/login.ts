@@ -10,7 +10,7 @@ async function request(path: string, body: unknown) {
     if (!r.ok) { if (r.status === 409) throw new Error('请先恢复原来的 Happy 加密身份，再登录此账号。'); throw new Error('登录未完成或已过期，请重新开始。'); }
     return r.json();
 }
-export async function beginTokenHubLogin() {
+export async function beginTokenHubLogin(): Promise<{ token: string; secret: string } | void> {
     const existing = await TokenStorage.getCredentials();
     let secret = existing?.secret ?? localStorage.getItem(pendingKey);
     if (!secret) { secret = encodeBase64(await getRandomBytesAsync(32), 'base64url'); localStorage.setItem(pendingKey, secret); }
@@ -48,3 +48,9 @@ export async function completeTokenHubLogin(url: string) {
     } finally { sessionStorage.removeItem(flowKey); }
 }
 export function identitySaved() { try { localStorage.removeItem(pendingKey); } catch { /* Existing credential persistence already succeeded. */ } }
+export function hasMatchingWebLogin(url: string): boolean {
+    try { const flow = JSON.parse(sessionStorage.getItem(flowKey) ?? 'null'); return !!flow && flow.state === new URL(url).searchParams.get('state'); } catch { return false; }
+}
+export async function saveTokenHubLogin(result: { token: string; secret: string }, login: (token: string, secret: string) => Promise<void>) {
+    await login(result.token, result.secret); identitySaved();
+}

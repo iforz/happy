@@ -4,6 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/auth/AuthContext';
 import { getServerUrl } from '@/sync/serverConfig';
+import { tokenHubFetch } from '@/integrations/tokenhub/transport';
 import {
     createWorkMockClient, WorkMockError, WORK_MOCK_MAX_PROMPT_LENGTH,
     type WorkMockModel, type WorkMockUsage,
@@ -47,16 +48,15 @@ export default function TokenHubWorkMock() {
     const activeStream = React.useRef<AbortController | null>(null);
     const clientState = React.useMemo(() => {
         try {
-            return { client: createWorkMockClient({ baseUrl: getServerUrl(), tokenProvider: async () => token ?? null }), error: null };
+            return { client: createWorkMockClient({ baseUrl: getServerUrl(), tokenProvider: async () => token ?? null, fetch: tokenHubFetch }), error: null };
         } catch (cause) { return { client: null, error: errorMessage(cause) }; }
     }, [token, reload]);
 
-    // A pushed route may hide this screen without unmounting it.
     useFocusEffect(React.useCallback(() => {
         const controller = new AbortController();
         setModels([]); setSelectedModel(''); setOutput(''); setChunkCount(0); setUsage(null); setPhase('idle');
         setError(clientState.error);
-        if (Platform.OS === 'web' && token && clientState.client) {
+        if (token && clientState.client) {
             setLoadingModels(true);
             void clientState.client.listModels(controller.signal).then(catalog => {
                 if (!controller.signal.aborted) { setModels(catalog); setSelectedModel(catalog[0].id); }
@@ -101,19 +101,19 @@ export default function TokenHubWorkMock() {
         setPhase('cancelled'); setUsage(null); setError(null);
     }
     const busy = phase === 'streaming';
-    const canStart = Platform.OS === 'web' && !!token && !!clientState.client && !!selectedModel && !!prompt.trim() && !loadingModels && !busy;
+    const canStart = !!token && !!clientState.client && !!selectedModel && !!prompt.trim() && !loadingModels && !busy;
     const phaseLabel = { idle: '尚未开始', streaming: '正在接收流式内容…', complete: '已收到完成标记', cancelled: '已取消，保留已收到的部分内容', failed: '请求失败，以下内容可能不完整' }[phase];
 
     return <>
         <Stack.Screen options={{ title: 'TokenHub · Mock 实验' }} />
         <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <View style={styles.banner}>
-                <Text style={styles.badge}>MOCK ONLY · 不计费 · Web 实验</Text>
+                <Text style={styles.badge}>MOCK ONLY · 不计费 · 跨端实验</Text>
                 <Text accessibilityRole="header" style={styles.heading}>Work 模拟网关</Text>
                 <Text style={styles.body}>仅测试模型选择、流式响应和取消。不会调用真实模型，不会扣余额，也不会更改现有会话或模型配置。</Text>
                 <Text style={styles.note}>使用当前 Work 登录与已选择的服务器。提示词会发送给该服务器，请勿输入密码或其他敏感内容。</Text>
             </View>
-            {Platform.OS !== 'web' ? <Text style={styles.body}>此实验目前仅支持 Web。请在 Work 网页版打开 /tokenhub/work-mock。</Text> : !token ?
+            {!token ?
                 <View style={styles.card}><Text style={styles.body}>请先登录 Work，然后返回此实验页。</Text><Pressable accessibilityRole="button" onPress={() => router.replace('/')} style={styles.button}><Text style={styles.buttonText}>返回登录</Text></Pressable></View> : <>
                     <View style={styles.card}>
                         <Text accessibilityRole="header" style={styles.sectionTitle}>1. 选择模拟模型</Text>

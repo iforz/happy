@@ -1,5 +1,4 @@
 import { TokenHubWelcome } from "@/integrations/tokenhub/TokenHubWelcome";
-import { RoundButton } from "@/components/RoundButton";
 import { useAuth } from "@/auth/AuthContext";
 import { Platform } from "react-native";
 import * as React from 'react';
@@ -8,14 +7,10 @@ import { authGetToken } from "@/auth/authGetToken";
 import { useRouter } from "expo-router";
 import { getRandomBytesAsync } from "expo-crypto";
 import { trackAccountCreated, trackAccountRestored } from '@/track';
-import { HomeHeaderNotAuth } from "@/components/HomeHeader";
 import { MainView } from "@/components/MainView";
 import { OnboardingLinkComputer } from "@/components/onboarding/LinkComputer";
-import { OnboardingScreen } from "@/components/onboarding/OnboardingScreen";
-import { WelcomeContent } from "@/components/onboarding/OnboardingContent";
 import { shouldShowFirstRunInstall } from "@/components/onboarding/firstRunOnboarding";
 import { useAllMachines, useIsDataReady } from "@/sync/storage";
-import { t } from '@/text';
 import { isRunningOnMac } from '@/utils/platform';
 
 export default function Home() {
@@ -51,7 +46,6 @@ function Authenticated() {
 function NotAuthenticated() {
     const auth = useAuth();
     const router = useRouter();
-    const isMobile = Platform.OS === 'android' || Platform.OS === 'ios';
 
     const createAccount = async () => {
         try {
@@ -71,23 +65,6 @@ function NotAuthenticated() {
         router.push('/restore');
     };
 
-    if (Platform.OS === 'web') return <TokenHubWelcome restore={openRestore} create={createAccount} />;
+    return <TokenHubWelcome restore={openRestore} create={createAccount} />;
 
-    // One filled action and one quiet text action underneath it. On a phone
-    // the restore path is rare, so it reads as a footnote; in a browser the
-    // usual way in is an account that already lives on a phone.
-    return (
-        <OnboardingScreen
-            header={<HomeHeaderNotAuth />}
-            content={<WelcomeContent />}
-            primary={isMobile ? (
-                <RoundButton title={t('onboarding.createAccount')} action={createAccount} />
-            ) : (
-                <RoundButton title={t('welcome.loginWithMobileApp')} onPress={openRestore} />
-            )}
-            secondary={isMobile
-                ? { title: t('onboarding.restoreExisting'), onPress: openRestore }
-                : { title: t('welcome.createAccount'), action: createAccount }}
-        />
-    );
 }

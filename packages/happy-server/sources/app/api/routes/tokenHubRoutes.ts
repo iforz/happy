@@ -5,8 +5,9 @@ import { trustedJson, trustedTokenHubOrigin, unwrap } from '@/app/tokenhub/trust
 import { loadPageConfig } from '@/app/tokenhub/pageConfig';
 import { bindIdentity, type Identity } from '@/app/tokenhub/binding';
 import { getWorkAuthorization, type WorkAuthorization, type TokenHubSession } from '@/app/tokenhub/workAuthorization';
+import { tokenHubNativeRoutes } from './tokenHubNativeRoutes';
 
-interface Dependencies {
+export interface TokenHubRouteDependencies {
     transport?: typeof fetch;
     flows?: LoginFlows;
     pageConfig?: typeof loadPageConfig;
@@ -14,7 +15,7 @@ interface Dependencies {
     token?: (id: string, extras?: { tokenhub: TokenHubSession }) => Promise<string>;
     authorization?: WorkAuthorization;
 }
-export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
+export function tokenHubRoutes(app: Fastify, dependencies: TokenHubRouteDependencies = {}) {
     const flows = dependencies.flows ?? new LoginFlows();
     const transport = dependencies.transport ?? fetch;
     const config = dependencies.pageConfig ?? loadPageConfig;
@@ -85,4 +86,5 @@ export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
             return reply.code(400).send({ error: 'Login expired or could not be verified; start again' });
         }
     });
+    tokenHubNativeRoutes(app, dependencies);
 }
