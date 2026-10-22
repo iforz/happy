@@ -1,0 +1,17 @@
+import { beforeEach, afterEach, it, expect, vi } from 'vitest';
+const { getCredentials }=vi.hoisted(()=>({getCredentials:vi.fn()}));
+vi.mock('@/auth/tokenStorage',()=>({TokenStorage:{getCredentials}}));
+vi.mock('@/sync/serverConfig',()=>({getServerUrl:()=> 'https://happy.example.test'}));
+vi.mock('expo-crypto',()=>({getRandomBytesAsync:async()=>new Uint8Array(32).fill(7)}));
+vi.mock('@/encryption/libsodium.lib',()=>({default:{crypto_sign_seed_keypair:()=>({publicKey:new Uint8Array(32).fill(1),privateKey:new Uint8Array(64).fill(2)}),crypto_sign_detached:()=>new Uint8Array(64).fill(3)}}));
+import { beginTokenHubLogin, completeTokenHubLogin } from './login';
+function storage(){const map=new Map<string,string>();return{getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>map.set(k,v),removeItem:(k:string)=>map.delete(k)}}
+let local:ReturnType<typeof storage>,session:ReturnType<typeof storage>,fetcher:ReturnType<typeof vi.fn>;
+const state='s'.repeat(43),proof='bound-server-proof',secret=Buffer.alloc(32,9).toString('base64url');
+beforeEach(()=>{local=storage();session=storage();fetcher=vi.fn();vi.stubGlobal('localStorage',local);vi.stubGlobal('sessionStorage',session);vi.stubGlobal('fetch',fetcher);vi.stubGlobal('window',{location:{assign:vi.fn()},history:{replaceState:vi.fn()}});getCredentials.mockResolvedValue({secret,token:'existing-session'});});
+afterEach(()=>vi.unstubAllGlobals());
+async function start(){fetcher.mockResolvedValueOnce(new Response(JSON.stringify({authorizeUrl:'https://accounts.example.test/happy/authorize?state='+state,state,proof,tokenHubOrigin:'https://accounts.example.test'}),{headers:{'content-type':'application/json'}}));await beginTokenHubLogin();}
+it('preserves an existing secret and accepts only a native Happy response',async()=>{await start();expect(JSON.parse(session.getItem('happy-tokenhub-flow:v1')!).secret).toBe(secret);fetcher.mockResolvedValueOnce(new Response(JSON.stringify({token:'native-happy-session'})));expect(await completeTokenHubLogin('https://happy.example.test/tokenhub/callback?state='+state+'&code=short-code')).toEqual({token:'native-happy-session',secret});expect(session.getItem('happy-tokenhub-flow:v1')).toBeNull();expect(window.history.replaceState).toHaveBeenCalledWith(null,'','/tokenhub/callback');});
+it('rejects mismatched state before exchange',async()=>{await start();await expect(completeTokenHubLogin('https://happy.example.test/tokenhub/callback?state=wrong&code=short')).rejects.toThrow();expect(fetcher).toHaveBeenCalledTimes(1);});
+it('cleans cancellation state without replacing credentials',async()=>{await start();fetcher.mockResolvedValueOnce(new Response('{}',{status:400}));await expect(completeTokenHubLogin('https://happy.example.test/tokenhub/callback?state='+state+'&error=access_denied')).rejects.toThrow('取消');expect(session.getItem('happy-tokenhub-flow:v1')).toBeNull();});
+it('does not overwrite an identity changed in another tab',async()=>{await start();getCredentials.mockResolvedValue({secret:'different-local-secret',token:'newer-session'});fetcher.mockResolvedValueOnce(new Response('{}',{status:400}));await expect(completeTokenHubLogin('https://happy.example.test/tokenhub/callback?state='+state+'&code=short')).rejects.toThrow('身份已变化');expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toEqual({state,error:'access_denied'});});

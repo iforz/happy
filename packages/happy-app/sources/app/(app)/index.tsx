@@ -1,3 +1,4 @@
+import { TokenHubWelcome } from "@/integrations/tokenhub/TokenHubWelcome";
 import { RoundButton } from "@/components/RoundButton";
 import { useAuth } from "@/auth/AuthContext";
 import { Platform } from "react-native";
@@ -69,6 +70,8 @@ function NotAuthenticated() {
         trackAccountRestored();
         router.push('/restore');
     };
+
+    if (Platform.OS === 'web') return <TokenHubWelcome restore={openRestore} create={createAccount} />;
 
     // One filled action and one quiet text action underneath it. On a phone
     // the restore path is rare, so it reads as a footnote; in a browser the

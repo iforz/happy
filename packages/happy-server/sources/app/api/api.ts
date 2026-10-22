@@ -3,6 +3,7 @@ import { isProduction, log, logger } from "@/utils/log";
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from "fastify-type-provider-zod";
 import { onShutdown } from "@/utils/shutdown";
 import { Fastify } from "./types";
+import { tokenHubRoutes } from "./routes/tokenHubRoutes";
 import { authRoutes } from "./routes/authRoutes";
 import { pushRoutes } from "./routes/pushRoutes";
 import { sessionRoutes } from "./routes/sessionRoutes";
@@ -100,6 +101,7 @@ export async function startApi(opts: StartApiOptions = {}) {
 
     // Routes
     authRoutes(typed);
+    tokenHubRoutes(typed);
     pushRoutes(typed);
     sessionRoutes(typed);
     accountRoutes(typed);

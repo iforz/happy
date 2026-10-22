@@ -28,6 +28,7 @@ model Account {
     updatedAt       DateTime    @updatedAt
     settings        String?
     settingsVersion Int         @default(0)
+    TokenHubIdentity TokenHubIdentity[]
     githubUserId    String?     @unique
     githubUser      GithubUser? @relation(fields: [githubUserId], references: [id])
 
@@ -407,4 +408,16 @@ model VoiceConversation {
     createdAt                  DateTime @default(now())
 
     @@index([accountId, createdAt(sort: Desc)])
+}
+
+// External identity binding never stores encryption secrets or provider bearer tokens.
+model TokenHubIdentity {
+    authority String
+    issuer String
+    subject String
+    accountId String
+    account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+    createdAt DateTime @default(now())
+    @@id([authority, subject])
+    @@unique([authority, accountId])
 }
