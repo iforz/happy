@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Image, Linking, Pressable, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { useUnistyles } from 'react-native-unistyles';
 import { RoundButton } from '@/components/RoundButton';
 import { usePageConfig } from './usePageConfig';
@@ -7,7 +7,7 @@ import { beginTokenHubLogin } from './login';
 export function TokenHubWelcome({ restore, create }: { restore: () => void; create: () => Promise<void> }) {
     const { config: c, offline } = usePageConfig(); const { theme } = useUnistyles(); const [error, setError] = React.useState('');
     const login = async () => { try { await beginTokenHubLogin(); } catch (e) { setError(e instanceof Error ? e.message : '登录暂不可用。'); } };
-    return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, backgroundColor: theme.colors.groupped.background }}>
+    return <ScrollView style={{ flex: 1, backgroundColor: theme.colors.groupped.background }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
         <View style={{ width: '100%', maxWidth: 520, gap: 22 }}>
             {c.logoUrl ? <Image source={{ uri: c.logoUrl }} accessibilityLabel={c.brandName} style={{ width: 72, height: 72, alignSelf: 'center' }} resizeMode="contain" /> : null}
             <Text style={{ color: theme.colors.text, fontSize: 24, fontWeight: '600', textAlign: 'center' }}>{c.brandName}</Text>
@@ -20,5 +20,5 @@ export function TokenHubWelcome({ restore, create }: { restore: () => void; crea
             <Text style={{ color: theme.colors.textSecondary, textAlign: 'center' }}>{c.footerText}</Text>
             {c.helpUrl ? <Pressable onPress={() => { void Linking.openURL(c.helpUrl); }}><Text style={{ color: theme.colors.textSecondary, textAlign: 'center' }}>帮助</Text></Pressable> : null}
         </View>
-    </View>;
+    </ScrollView>;
 }

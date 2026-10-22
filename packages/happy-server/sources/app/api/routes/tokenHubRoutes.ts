@@ -29,7 +29,7 @@ export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
         try { return { config: await config(transport, true), tokenHubOrigin: trustedTokenHubOrigin() }; }
         catch { return reply.code(503).send({ error: 'Display configuration unavailable' }); }
     });
-    app.post('/v1/tokenhub/start', { schema: { body: z.object({ publicKey: z.string().max(64) }).strict() } }, async (request, reply) => {
+    app.post('/v1/tokenhub/start', { bodyLimit: 8192, schema: { body: z.object({ publicKey: z.string().max(64) }).strict() } }, async (request, reply) => {
         reply.header('Cache-Control', 'no-store');
         if (!enabled()) return reply.code(503).send({ error: 'Unified login is not enabled' });
         try {
@@ -42,7 +42,7 @@ export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
             return { authorizeUrl: location, state: flow.state, proof: flow.proof, tokenHubOrigin: origin };
         } catch { return reply.code(400).send({ error: 'Could not start login' }); }
     });
-    app.post('/v1/tokenhub/complete', { schema: { body: z.object({ state: z.string().min(43).max(128), code: z.string().max(128).optional(), error: z.literal('access_denied').optional(), signature: z.string().max(100).optional() }).strict() } }, async (request, reply) => {
+    app.post('/v1/tokenhub/complete', { bodyLimit: 8192, schema: { body: z.object({ state: z.string().min(43).max(128), code: z.string().max(128).optional(), error: z.literal('access_denied').optional(), signature: z.string().max(100).optional() }).strict() } }, async (request, reply) => {
         reply.header('Cache-Control', 'no-store');
         if (!enabled()) return reply.code(503).send({ error: 'Unified login is not enabled' });
         try {
@@ -69,7 +69,7 @@ export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
             const token = dependencies.token ? await dependencies.token(accountId) : await (await import('@/app/auth/auth')).auth.createToken(accountId);
             return { token };
         } catch (error) {
-            reply.header('Set-Cookie', clearCookie);
+            // Invalid/stale state must not clear a newer browser-bound transaction.
             if (error instanceof Error && error.message === 'identity_key_mismatch' || (error as { code?: string })?.code === 'P2002') return reply.code(409).send({ error: 'Restore the original Happy encryption identity before linking this account' });
             return reply.code(400).send({ error: 'Login expired or could not be verified; start again' });
         }

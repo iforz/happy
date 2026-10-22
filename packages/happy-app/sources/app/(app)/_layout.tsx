@@ -205,6 +205,7 @@ export default function RootLayout() {
                     headerBackTitle: t('common.back'),
                 }}
             />
+            <Stack.Screen name="tokenhub/callback" options={{ headerShown: false }} />
             <Stack.Screen
                 name="restore/index"
                 options={{

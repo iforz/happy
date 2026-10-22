@@ -12,13 +12,19 @@ its own session only after identity proof and binding. A mismatched public key
 requires restoring the original Happy identity; local encryption keys are not
 sent to the external provider.
 
-Focused tests cover URL/SSRF boundaries, issuer/audience/nonce/expiry, state
-consumption, key proof, replay, cancellation and identity mismatch. They are not
-yet verified: the first test-runner launch failed because @vitest/utils had not
-arrived during the still-running locked dependency installation. Prisma
-regeneration, migration validation, full typechecks, focused tests, production
-web export and runtime smoke checks remain required. Mock checks are not proof
-of production account federation.
+Focused validation now passes: 17 relay tests across five files and 39 client
+tests across three files. These cover URL/SSRF boundaries,
+issuer/audience/nonce/expiry, state consumption, public-key proof, replay,
+cancellation, concurrent binding conflict recovery, stale callback isolation,
+and display cache fallback. The additive migration was applied twice to a real
+isolated PGlite database and both identity uniqueness constraints were checked.
+Client contract tests resolve the shared display source directly; production
+workspace package resolution still needs its build check.
+
+Prisma regeneration, full typechecks, production web export and runtime smoke
+checks remain required while the locked dependency installation finishes.
+Passing isolated tests is not proof of production account federation. No live
+user or test encryption identity has been created.
 
 The only bootstrap provider destination is TOKENHUB_URL, an explicitly trusted
 HTTPS origin. Do not accept that value from a URL query or provider response.

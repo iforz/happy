@@ -23,10 +23,13 @@ export async function beginTokenHubLogin() {
     window.location.assign(u.toString());
 }
 export async function completeTokenHubLogin(url: string) {
-    const p = new URL(url); const flow = JSON.parse(sessionStorage.getItem(flowKey) ?? 'null');
+    const p = new URL(url); let flow: { state: string; proof: string; secret: string; at: number } | null = null;
+    try { flow = JSON.parse(sessionStorage.getItem(flowKey) ?? 'null'); } catch { sessionStorage.removeItem(flowKey); throw new Error('登录状态无效，请重新开始。'); }
     // Clear one-time URL parameters promptly; no identity token appears in the URL.
     window.history.replaceState(null, '', p.pathname);
-    if (!flow || Date.now() - flow.at > 300000 || flow.at > Date.now() || p.searchParams.getAll('state').length !== 1 || p.searchParams.get('state') !== flow.state || p.searchParams.getAll('code').length > 1 || p.searchParams.getAll('error').length > 1) { sessionStorage.removeItem(flowKey); throw new Error('登录状态无效或已过期，请重新开始。'); }
+    if (!flow || typeof flow.at !== 'number' || typeof flow.state !== 'string' || typeof flow.secret !== 'string' || typeof flow.proof !== 'string' || Date.now() - flow.at > 300000 || flow.at > Date.now()) { sessionStorage.removeItem(flowKey); throw new Error('登录状态无效或已过期，请重新开始。'); }
+    // A stale callback must not destroy a newer in-flight login in this tab.
+    if (p.searchParams.getAll('state').length !== 1 || p.searchParams.get('state') !== flow.state || p.searchParams.getAll('code').length > 1 || p.searchParams.getAll('error').length > 1) throw new Error('此回调不属于当前登录，请返回最新的登录页面。');
     try {
         if (p.searchParams.has('error')) {
             try { await request('/v1/tokenhub/complete', { state: flow.state, error: 'access_denied' }); } catch { /* Cancellation also consumes server state. */ } throw new Error('登录已取消。');

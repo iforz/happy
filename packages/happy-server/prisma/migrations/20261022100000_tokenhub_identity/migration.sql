@@ -1,4 +1,5 @@
-CREATE TABLE "TokenHubIdentity" (
+BEGIN;
+CREATE TABLE IF NOT EXISTS "TokenHubIdentity" (
  "authority" TEXT NOT NULL,
  "issuer" TEXT NOT NULL,
  "subject" TEXT NOT NULL,
@@ -7,4 +8,5 @@ CREATE TABLE "TokenHubIdentity" (
  CONSTRAINT "TokenHubIdentity_pkey" PRIMARY KEY ("authority", "subject"),
  CONSTRAINT "TokenHubIdentity_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
-CREATE UNIQUE INDEX "TokenHubIdentity_authority_accountId_key" ON "TokenHubIdentity"("authority", "accountId");
+CREATE UNIQUE INDEX IF NOT EXISTS "TokenHubIdentity_authority_accountId_key" ON "TokenHubIdentity"("authority", "accountId");
+COMMIT;
