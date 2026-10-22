@@ -123,7 +123,7 @@ export function EmptySessionsTablet() {
                 </>
             ) : (
                 <Text style={styles.descriptionText}>
-                    Install and run Happy on your computer to connect it.
+                    Install and run Work on your computer to connect it.
                 </Text>
             )}
         </View>

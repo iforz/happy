@@ -1,3 +1,4 @@
+import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import * as React from 'react';
 import { Platform, Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -137,54 +138,11 @@ function SecondaryButton({ title, onPress, action, disabled }: {
  * Where somebody stuck on this screen can turn, and to whom. The same list
  * the desktop app offers during its own setup.
  */
-const HELP_ISSUES = { label: () => t('onboarding.helpIssues'), url: 'https://github.com/slopus/happy/issues' };
-const HELP_DISCORD = { label: () => t('onboarding.helpDiscord'), url: 'https://discord.gg/fX9WBAhyfD' };
-const HELP_LINKS: readonly { label: () => string; url: string }[] = Platform.OS === 'android'
-    // Android's native alert shows at most three buttons and drops the rest,
-    // Cancel included, so it gets the two public places plus Cancel.
-    ? [HELP_DISCORD, HELP_ISSUES]
-    : [
-        HELP_DISCORD,
-        { label: () => t('onboarding.helpBra1nDump'), url: 'https://x.com/bra1n_dump' },
-        { label: () => t('onboarding.helpEx3ndr'), url: 'https://x.com/Ex3NDR' },
-        HELP_ISSUES,
-    ];
-
-/**
- * Somewhere to turn without leaving the step you are stuck on. The options
- * arrive as the app's ordinary alert — a native sheet on a phone, the web
- * modal in a browser — so this adds a corner button, not a new surface.
- */
 export const GetHelpButton = React.memo(function GetHelpButton() {
-    const { theme } = useUnistyles();
-
-    const openHelp = React.useCallback(() => {
-        const links = HELP_LINKS.map((link) => ({
-            text: link.label(),
-            onPress: () => { void openExternalUrl(link.url); },
-        }));
-        const cancel = { text: t('common.cancel'), style: 'cancel' as const };
-        Modal.alert(
-            t('onboarding.getHelp'),
-            t('onboarding.helpMessage'),
-            // Android fills its slots by position (neutral, negative,
-            // positive), so Cancel goes in the middle to land on negative.
-            Platform.OS === 'android' ? [links[0], cancel, links[1]] : [...links, cancel],
-        );
-    }, []);
-
-    return (
-        <Pressable
-            onPress={openHelp}
-            accessibilityRole="button"
-            accessibilityLabel={t('onboarding.getHelp')}
-            hitSlop={8}
-            style={({ pressed }) => [styles.getHelp, pressed && styles.getHelpPressed]}
-        >
-            <Ionicons name="help-circle-outline" size={17} color={theme.colors.textSecondary} />
-            <Text style={styles.getHelpText}>{t('onboarding.getHelp')}</Text>
-        </Pressable>
-    );
+ const { theme } = useUnistyles(); const { config } = usePageConfig();
+ if (!config.helpUrl) return null;
+ return <Pressable onPress={() => { void openExternalUrl(config.helpUrl); }} accessibilityRole="link" accessibilityLabel={t('onboarding.getHelp')} style={styles.getHelp}>
+ <Ionicons name="help-circle-outline" size={17} color={theme.colors.textSecondary} /><Text style={styles.getHelpText}>{t('onboarding.getHelp')}</Text></Pressable>;
 });
 
 const styles = StyleSheet.create((theme) => ({

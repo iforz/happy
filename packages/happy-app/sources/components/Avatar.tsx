@@ -31,7 +31,7 @@ const harnessIcons: Record<AvatarHarnessIcon, number> = {
     claude: require('@/assets/images/icon-claude.png'),
     codex: require('@/assets/images/icon-gpt.png'),
     agy: require('@/assets/images/icon-agy.png'),
-    rig: require('@/assets/images/logo-black.png'),
+    rig: require('@/assets/images/work-mark.png'),
 };
 
 // One badge geometry for every place an avatar carries a harness icon. The

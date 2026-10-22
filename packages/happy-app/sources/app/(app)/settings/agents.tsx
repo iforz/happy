@@ -186,7 +186,7 @@ export default function AgentsSettingsScreen() {
                 {machineChoices.length === 0 ? (
                     <Item
                         title="No connected machines"
-                        subtitle="Run Happy on a computer to connect it"
+                        subtitle="Run Work on a computer to connect it"
                         icon={<Ionicons name="desktop-outline" size={29} color={theme.colors.textSecondary} />}
                         disabled
                         showChevron={false}

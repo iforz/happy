@@ -10,5 +10,5 @@ export default function TokenHubCallback() {
         if (Platform.OS !== 'web' || started.current) return; started.current = true;
         void completeTokenHubLogin(window.location.href).then(async result => { await auth.login(result.token, result.secret); identitySaved(); router.replace('/'); }).catch(e => setMessage(e instanceof Error ? e.message : '登录失败，请重新开始。'));
     }, [auth, router]);
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 24 }}><Text accessibilityRole="header">{message}</Text><Pressable onPress={() => router.replace('/')}><Text>返回 Happy</Text></Pressable><Pressable onPress={() => router.push('/restore')}><Text>恢复原有加密身份</Text></Pressable></View>;
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 24 }}><Text accessibilityRole="header">{message}</Text><Pressable onPress={() => router.replace('/')}><Text>返回 Work</Text></Pressable><Pressable onPress={() => router.push('/restore')}><Text>恢复原有加密身份</Text></Pressable></View>;
 }

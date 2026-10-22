@@ -1,3 +1,4 @@
+import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import * as React from 'react';
 import { Linking, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,7 @@ import { Modal } from '@/modal';
 import { layout } from '@/components/layout';
 import { t } from '@/text';
 
-const DESKTOP_URL = 'https://happy.engineering';
+
 
 /**
  * What to check when every linked computer is offline. The order is the
@@ -26,6 +27,7 @@ const DESKTOP_URL = 'https://happy.engineering';
  * agent on the computer at the local Happy logs.
  */
 export default function TroubleshootScreen() {
+    const { config } = usePageConfig();
     const { theme } = useUnistyles();
     const router = useRouter();
     const machines = useAllMachines({ includeOffline: true });
@@ -77,13 +79,13 @@ export default function TroubleshootScreen() {
                     {step('desktop-outline', t('troubleshoot.desktopStep'), (
                         <Text style={styles.stepBody}>
                             {t('troubleshoot.desktopBodyPrefix')}
-                            <Text
+                            {config.downloadUrl && <Text
                                 style={styles.link}
                                 accessibilityRole="link"
-                                onPress={() => { void Linking.openURL(DESKTOP_URL); }}
+                                onPress={() => { if (config.downloadUrl) void Linking.openURL(config.downloadUrl); }}
                             >
                                 {t('troubleshoot.desktopBodyLink')}
-                            </Text>
+                            </Text>}
                             {t('troubleshoot.desktopBodySuffix')}
                         </Text>
                     ))}

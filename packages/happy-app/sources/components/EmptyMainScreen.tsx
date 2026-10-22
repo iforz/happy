@@ -1,3 +1,4 @@
+import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import React from 'react';
 import { View, Text, Platform, Pressable, Linking, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -149,6 +150,7 @@ export function EmptyMainScreen({
     onShowArchived?: () => void;
 }) {
     const { connectTerminal, connectWithUrl, isLoading } = useConnectTerminal();
+    const { config } = usePageConfig();
     const { theme } = useUnistyles();
     const styles = stylesheet;
     const router = useRouter();
@@ -204,10 +206,10 @@ export function EmptyMainScreen({
                 {t('components.emptyMainScreen.desktopSetupInstructions')}
                 {'\n\n'}{t('components.emptyMainScreen.harnessDescription')}
             </Text>
-            <RoundButton
+            {config.downloadUrl && (            <RoundButton
                 title={t('components.emptyMainScreen.getDesktop')}
-                action={async () => { await Linking.openURL('https://happy.engineering'); }}
-            />
+                action={async () => { await Linking.openURL(config.downloadUrl!); }}
+            />) }
             <Pressable
                 onPress={() => setShowManualSetup(value => !value)}
                 accessibilityRole="button"

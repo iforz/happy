@@ -55,7 +55,7 @@ export const HappyAgentDiffView = React.memo(function HappyAgentDiffView({
             (error: unknown) => {
                 if (!cancelled) setState({
                     status: 'error',
-                    message: error instanceof Error ? error.message : 'Could not load changes from Happy Agent.',
+                    message: error instanceof Error ? error.message : 'Could not load changes from Work Agent.',
                 });
             },
         );
@@ -83,7 +83,7 @@ export const HappyAgentDiffView = React.memo(function HappyAgentDiffView({
 
     let content: React.ReactNode;
     if (!supported) {
-        content = <ChangesMessage message="Update Happy Agent on your computer to view changes in this session." />;
+        content = <ChangesMessage message="Update Work Agent on your computer to view changes in this session." />;
     } else if (state.status === 'loading') {
         content = <View style={styles.centered}><ActivityIndicator size="small" color={theme.colors.textSecondary} /></View>;
     } else if (state.status === 'error') {

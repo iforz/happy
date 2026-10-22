@@ -1,3 +1,4 @@
+import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import * as React from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,7 +7,7 @@ import { Typography } from '@/constants/Typography';
 import { t } from '@/text';
 import { HappyEngineeringWordmark } from './HappyEngineeringWordmark';
 
-const DESKTOP_URL = 'https://happy.engineering';
+
 const WORDMARK_HEIGHT = 84;
 /**
  * The titles are already large, so like the system's own large titles they
@@ -55,9 +56,10 @@ export const LinkComputerContent = React.memo(function LinkComputerContent({
     disabled?: boolean;
     error?: string | null;
 }) {
+    const { config } = usePageConfig();
     const openDesktopSite = React.useCallback(() => {
-        void Linking.openURL(DESKTOP_URL);
-    }, []);
+        if (config.downloadUrl) void Linking.openURL(config.downloadUrl);
+    }, [config.downloadUrl]);
     return (
         <View>
             <Text style={styles.title} maxFontSizeMultiplier={TITLE_MAX_SCALE} accessibilityRole="header">
@@ -72,13 +74,13 @@ export const LinkComputerContent = React.memo(function LinkComputerContent({
                 >
                     <Text style={styles.body}>
                         {t('onboarding.installBodyPrefix')}
-                        <Text
+                        {config.downloadUrl && <Text
                             style={styles.link}
                             accessibilityRole={onToggle ? 'link' : undefined}
                             onPress={onToggle ? openDesktopSite : undefined}
                         >
                             {t('onboarding.installBodyLink')}
-                        </Text>
+                        </Text>}
                         {t('onboarding.installBodySuffix')}
                     </Text>
                 </ChecklistRow>

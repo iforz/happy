@@ -1,3 +1,5 @@
+import { HappyEngineeringWordmark } from './onboarding/HappyEngineeringWordmark';
+import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import { NativeScrollEvent, NativeSyntheticEvent, View, ScrollView, Pressable, Platform } from 'react-native';
 import { openExternalUrl } from '@/utils/openExternalUrl';
 import { Image } from 'expo-image';
@@ -78,6 +80,7 @@ export const SettingsView = React.memo(function SettingsView({
     bottomContentInset?: number;
     onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 }) {
+    const { config } = usePageConfig();
     const { theme } = useUnistyles();
     const router = useRouter();
     const appVersion = Constants.expoConfig?.version || '1.0.0';
@@ -102,11 +105,11 @@ export const SettingsView = React.memo(function SettingsView({
     const { connectTerminal, connectWithUrl, isLoading } = useConnectTerminal();
 
     const handleGitHub = async () => {
-        await openExternalUrl('https://github.com/slopus/happy');
+        if (config.sourceUrl) await openExternalUrl(config.sourceUrl);
     };
 
     const handleReportIssue = async () => {
-        await openExternalUrl('https://github.com/slopus/happy/issues');
+        if (config.helpUrl) await openExternalUrl(config.helpUrl);
     };
 
     const handleSubscribe = async () => {
@@ -218,11 +221,7 @@ export const SettingsView = React.memo(function SettingsView({
                     ) : (
                         // Logo view: Original logo + version
                         <>
-                            <Image
-                                source={theme.dark ? require('@/assets/images/logotype-light.png') : require('@/assets/images/logotype-dark.png')}
-                                contentFit="contain"
-                                style={{ width: 300, height: 90, marginBottom: 12 }}
-                            />
+                            <HappyEngineeringWordmark height={72} />
                         </>
                     )}
                 </View>
@@ -375,27 +374,35 @@ export const SettingsView = React.memo(function SettingsView({
                         router.push('/changelog');
                     }}
                 />
+                {config.sourceUrl && (
                 <Item
                     title={t('settings.github')}
                     icon={<Ionicons name="logo-github" size={29} color={theme.colors.text} />}
-                    detail="slopus/happy"
+
                     onPress={handleGitHub}
                 />
+                )}
+                {config.helpUrl && (
                 <Item
                     title={t('settings.reportIssue')}
                     icon={<Ionicons name="bug-outline" size={29} color="#FF3B30" />}
                     onPress={handleReportIssue}
                 />
+                )}
+                {config.privacyUrl && (
                 <Item
                     title={t('settings.privacyPolicy')}
                     icon={<Ionicons name="shield-checkmark-outline" size={29} color="#007AFF" />}
-                    onPress={() => openExternalUrl('https://happy.engineering/privacy/')}
+                    onPress={() => openExternalUrl(config.privacyUrl!)}
                 />
+                )}
+                {config.termsUrl && (
                 <Item
                     title={t('settings.termsOfService')}
                     icon={<Ionicons name="document-text-outline" size={29} color="#007AFF" />}
-                    onPress={() => openExternalUrl('https://happy.engineering/terms/')}
+                    onPress={() => openExternalUrl(config.termsUrl!)}
                 />
+                )}
                 {Platform.OS === 'ios' && (
                     <Item
                         title={t('settings.eula')}

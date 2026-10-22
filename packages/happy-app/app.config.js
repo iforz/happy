@@ -2,9 +2,9 @@ const { execFileSync } = require('node:child_process');
 
 const variant = process.env.APP_ENV || 'development';
 const name = {
-    development: "Happy (dev)",
-    preview: "Happy (preview)",
-    production: "Happy"
+    development: "Work (dev)",
+    preview: "Work (preview)",
+    production: "Work"
 }[variant];
 const bundleId = {
     development: "com.slopus.happy.dev",
@@ -62,7 +62,7 @@ export default {
         version: "1.8.0",
         runtimeVersion: "21",
         orientation: "default",
-        icon: "./sources/assets/images/icon.png",
+        icon: "./sources/assets/images/work-mark.png",
         scheme: "happy",
         userInterfaceStyle: "automatic",
         ios: {
@@ -93,8 +93,8 @@ export default {
         },
         android: {
             adaptiveIcon: {
-                foregroundImage: "./sources/assets/images/icon-adaptive.png",
-                monochromeImage: "./sources/assets/images/icon-monochrome.png",
+                foregroundImage: "./sources/assets/images/work-mark.png",
+                monochromeImage: "./sources/assets/images/work-mark.png",
                 backgroundColor: "#000000"
             },
             permissions: [
@@ -131,7 +131,7 @@ export default {
         web: {
             bundler: "metro",
             output: "single",
-            favicon: "./sources/assets/images/favicon.png"
+            favicon: "./sources/assets/images/work-favicon.png"
         },
         plugins: [
             require("./plugins/withEinkCompatibility.js"),
@@ -184,7 +184,7 @@ export default {
                 "expo-notifications",
                 {
                     "enableBackgroundRemoteNotifications": true,
-                    "icon": "./sources/assets/images/icon-notification.png"
+                    "icon": "./sources/assets/images/work-mark.png"
                 }
             ],
             [
@@ -197,10 +197,10 @@ export default {
                         }
                     },
                     android: {
-                        image: "./sources/assets/images/splash-android-light.png",
+                        image: "./sources/assets/images/work-mark.png",
                         backgroundColor: "#F5F5F5",
                         dark: {
-                            image: "./sources/assets/images/splash-android-dark.png",
+                            image: "./sources/assets/images/work-mark.png",
                             backgroundColor: "#000000",
                         }
                     }

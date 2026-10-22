@@ -1,3 +1,4 @@
+import { HeaderLogo } from './HeaderLogo';
 import * as React from 'react';
 import { Header } from './navigation/Header';
 import { Platform, Pressable, View } from 'react-native';
@@ -121,17 +122,4 @@ function HeaderRightNotAuth() {
     );
 }
 
-function HeaderLeft() {
-    const styles = stylesheet;
-    const { theme } = useUnistyles();
-    return (
-        <View style={styles.logoContainer}>
-            <Image
-                source={require('@/assets/images/logo-black.png')}
-                contentFit="contain"
-                style={{ width: HEADER_LOGO_SIZE, height: HEADER_LOGO_SIZE }}
-                tintColor={theme.colors.header.tint}
-            />
-        </View>
-    );
-}
+function HeaderLeft() { return <HeaderLogo />; }

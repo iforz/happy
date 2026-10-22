@@ -472,7 +472,7 @@ export function getAvailablePermissionModes(
             modes.unshift({
                 key: current,
                 name: current,
-                description: 'Unavailable in the current Happy mode catalog',
+                description: 'Unavailable in the current Work mode catalog',
                 semanticKind: null,
                 disabled: true,
             });

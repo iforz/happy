@@ -1,3 +1,4 @@
+import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import * as React from 'react';
 import { ActivityIndicator, Keyboard, LayoutChangeEvent, Modal as RNModal, Platform, Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
@@ -140,7 +141,7 @@ const MOBILE_HOME_DOCK_TOP_PADDING = 8;
 // Sits in the gap the focused dock already leaves above the composer, so it
 // costs no layout: showing it must not move the pickers or the composer.
 const START_PROGRESS_ROW_HEIGHT = 18;
-const HARNESS_SETUP_HELP_URL = 'https://happy.engineering/docs/quick-start/';
+
 // Matches Shaker's own keyframes so a refused picker reads the same as every
 // other refusal in the app.
 const SHAKE_KEYFRAMES = [3, -3, 3, -3, 0];
@@ -682,6 +683,7 @@ export const HomeDock = React.memo(({
     onSubmitCancel?: () => void;
     showBottomBackdrop?: boolean;
 }) => {
+    const { config: pageConfig } = usePageConfig();
     const { theme } = useUnistyles();
     const safeArea = useSafeAreaInsets();
     const { height: windowHeight } = useWindowDimensions();
@@ -1378,7 +1380,7 @@ export const HomeDock = React.memo(({
 
     const openHarnessSetupHelp = () => {
         Keyboard.dismiss();
-        void openExternalUrl(HARNESS_SETUP_HELP_URL);
+        if (pageConfig.helpUrl) void openExternalUrl(pageConfig.helpUrl);
     };
 
     const getEnvironmentPickerConfig = (setting: EnvironmentSetting): PickerConfig => {
@@ -1554,7 +1556,7 @@ export const HomeDock = React.memo(({
     );
 
     const renderPickerRow = (row: EnvironmentRow, config: PickerConfig) => {
-        if (row.page === 'agent' && !hasAvailableHarness) {
+        if (row.page === 'agent' && !hasAvailableHarness && pageConfig.helpUrl) {
             return (
                 <Pressable
                     key={row.page}
