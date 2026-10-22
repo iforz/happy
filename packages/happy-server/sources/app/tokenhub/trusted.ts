@@ -11,7 +11,7 @@ const allowedPaths = new Set(['/api/v1/settings/happy', '/api/v1/auth/happy/meta
 export async function trustedJson(origin: string, path: string, init: RequestInit = {}, transport: typeof fetch = fetch): Promise<unknown> {
     if (!allowedPaths.has(path)) throw new Error('Untrusted endpoint');
     trustedTokenHubOrigin(origin);
-    const response = await transport(origin + path, { ...init, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(5000), headers: { Accept: 'application/json', ...init.headers } });
+    const response = await transport(origin + path, { ...init, credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Accept: 'application/json', 'Cache-Control': 'no-store', ...init.headers } });
     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('TokenHub unavailable');
     const reader = response.body?.getReader(); if (!reader) throw new Error('Missing body');
     const chunks: Uint8Array[] = []; let size = 0;

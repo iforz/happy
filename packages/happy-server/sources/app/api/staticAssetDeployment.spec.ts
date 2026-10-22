@@ -8,7 +8,7 @@ import path from 'node:path';
 // Focused static-plugin integration, not a boot of the database/auth stack.
 describe('self-hosted static asset deployment contract', () => {
     it('requires restart to register new hashes before switching the active index', async () => {
-        const source = await readFile(new URL('./api.ts', import.meta.url), 'utf8');
+        const source = await readFile(path.resolve('sources/app/api/api.ts'), 'utf8');
         expect(source).toMatch(/app\.register\(fastifyStatic,\s*\{[^}]*wildcard:\s*false/s);
         const root = await mkdtemp(path.join(tmpdir(), 'happy-static-deploy-'));
         const oldHtml = '<!DOCTYPE html><script src="/old-hash.js"></script>';

@@ -12,7 +12,7 @@ its own session only after identity proof and binding. A mismatched public key
 requires restoring the original Happy identity; local encryption keys are not
 sent to the external provider.
 
-Focused validation now passes: 17 relay tests across five files and 39 client
+Focused validation now passes: 18 relay tests across six files and 39 client
 tests across three files. These cover URL/SSRF boundaries,
 issuer/audience/nonce/expiry, state consumption, public-key proof, replay,
 cancellation, concurrent binding conflict recovery, stale callback isolation,
@@ -21,8 +21,11 @@ isolated PGlite database and both identity uniqueness constraints were checked.
 Client contract tests resolve the shared display source directly; production
 workspace package resolution still needs its build check.
 
-Prisma regeneration, full typechecks, production web export and runtime smoke
-checks remain required while the locked dependency installation finishes.
+Locked dependency installation, Prisma generation, shared-wire build, application
+full typecheck, server full typecheck and production server typecheck now pass.
+The server uses the standard TypeScript DOM definitions for the WebAssembly and
+Web APIs available in Node 24, with ambient package types limited to Node.
+Production web export and runtime smoke checks remain required.
 Passing isolated tests is not proof of production account federation. No live
 user or test encryption identity has been created.
 

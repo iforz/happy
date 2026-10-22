@@ -6,7 +6,7 @@ it('rejects SSRF destinations and never accepts a remote-provided fetch URL',asy
  const fetcher=vi.fn();await expect(trustedJson('https://accounts.example.test','https://attacker.test',{},fetcher)).rejects.toThrow();expect(fetcher).not.toHaveBeenCalled();
 });
 it('omits credentials, rejects redirects and bounds remote response size',async()=>{
- const f=vi.fn().mockResolvedValue(new Response('{"ok":true}',{headers:{'Content-Type':'application/json'}}));await trustedJson('https://accounts.example.test','/api/v1/settings/happy',{},f);expect(f).toHaveBeenCalledWith('https://accounts.example.test/api/v1/settings/happy',expect.objectContaining({credentials:'omit',redirect:'error',cache:'no-store'}));
+ const f=vi.fn().mockResolvedValue(new Response('{"ok":true}',{headers:{'Content-Type':'application/json'}}));await trustedJson('https://accounts.example.test','/api/v1/settings/happy',{},f);expect(f).toHaveBeenCalledWith('https://accounts.example.test/api/v1/settings/happy',expect.objectContaining({credentials:'omit',redirect:'error',headers:expect.objectContaining({'Cache-Control':'no-store'})}));
  f.mockResolvedValue(new Response('x'.repeat(65537),{headers:{'Content-Type':'application/json'}}));await expect(trustedJson('https://accounts.example.test','/api/v1/settings/happy',{},f)).rejects.toThrow();
 });
 it('validates version and dangerous URL schemes without interpreting markup',()=>{
