@@ -29,6 +29,7 @@ import { isLocalStorage, getLocalFilesDir } from "@/storage/files";
 import { publicLocalFilePath } from './publicLocalFilePath';
 import * as path from "path";
 import * as fs from "fs";
+import { getWorkAuthorization } from '@/app/tokenhub/workAuthorization';
 
 export interface StartApiOptions {
     port?: number;
@@ -41,6 +42,8 @@ export async function startApi(opts: StartApiOptions = {}) {
 
     // Configure
     log('Starting API...');
+    // Pin trust configuration before listening; invalid unified mode fails startup, never downgrades.
+    const authorization = getWorkAuthorization();
 
     // Start API
     const app = fastify({
@@ -78,7 +81,7 @@ export async function startApi(opts: StartApiOptions = {}) {
     // Enable features
     enableMonitoring(typed);
     enableErrorHandlers(typed, { skipNotFoundHandler: !!opts.staticDir });
-    enableAuthentication(typed);
+    enableAuthentication(typed, authorization);
 
     // Serve local files when using local storage
     if (isLocalStorage()) {
@@ -100,8 +103,8 @@ export async function startApi(opts: StartApiOptions = {}) {
     }
 
     // Routes
-    authRoutes(typed);
-    tokenHubRoutes(typed);
+    authRoutes(typed, authorization);
+    tokenHubRoutes(typed, { authorization });
     pushRoutes(typed);
     sessionRoutes(typed);
     accountRoutes(typed);
@@ -187,7 +190,7 @@ export async function startApi(opts: StartApiOptions = {}) {
     });
 
     // Start Socket
-    startSocket(typed);
+    startSocket(typed, authorization);
 
     // End
     log(`API ready on http://${host}:${port}`);

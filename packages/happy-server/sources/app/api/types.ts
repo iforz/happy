@@ -1,6 +1,7 @@
 import { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import { IncomingMessage, Server, ServerResponse } from "http";
+import type { VerifiedWorkSession } from '@/app/tokenhub/workAuthorization';
 
 export interface GitHubProfile {
     id: number;
@@ -53,6 +54,7 @@ export type Fastify = FastifyInstance<
 declare module 'fastify' {
     interface FastifyRequest {
         userId: string;
+        workSession?: VerifiedWorkSession;
         startTime?: number;
     }
     interface FastifyInstance {

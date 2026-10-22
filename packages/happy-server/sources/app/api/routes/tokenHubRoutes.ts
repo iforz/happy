@@ -4,18 +4,21 @@ import { LoginFlows, authorizationUrl, verifyHappyProof, verifyIdentity } from '
 import { trustedJson, trustedTokenHubOrigin, unwrap } from '@/app/tokenhub/trusted';
 import { loadPageConfig } from '@/app/tokenhub/pageConfig';
 import { bindIdentity, type Identity } from '@/app/tokenhub/binding';
+import { getWorkAuthorization, type WorkAuthorization, type TokenHubSession } from '@/app/tokenhub/workAuthorization';
 
 interface Dependencies {
     transport?: typeof fetch;
     flows?: LoginFlows;
     pageConfig?: typeof loadPageConfig;
     bind?: (authority: string, identity: Identity, publicKey: string) => Promise<string>;
-    token?: (id: string) => Promise<string>;
+    token?: (id: string, extras?: { tokenhub: TokenHubSession }) => Promise<string>;
+    authorization?: WorkAuthorization;
 }
 export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
     const flows = dependencies.flows ?? new LoginFlows();
     const transport = dependencies.transport ?? fetch;
     const config = dependencies.pageConfig ?? loadPageConfig;
+    const authorization = dependencies.authorization ?? getWorkAuthorization();
     const cookieName = '__Host-happy-tokenhub';
     const clearCookie = `${cookieName}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
     function selfOrigin() {
@@ -62,11 +65,19 @@ export function tokenHubRoutes(app: Fastify, dependencies: Dependencies = {}) {
             if (typeof result.id_token !== 'string') throw new Error('Missing assertion');
             const identity = verifyIdentity(result.id_token, jwks, metadata.issuer, flow.nonce);
             const publicKeyHex = Buffer.from(flow.publicKey, 'base64').toString('hex');
+            let extras: { tokenhub: TokenHubSession } | undefined;
+            if (authorization.enabled) {
+                if (typeof result.authorization_token !== 'string') throw new Error('Missing authorization token');
+                const grant = { authorizationToken: result.authorization_token, authority: origin, ...identity, publicKey: publicKeyHex };
+                // Validate the grant before creating/binding an account. Never accept a decoded JWT as authority.
+                if (await authorization.verifyGrant(grant, { ip: request.ip, userAgent: request.headers['user-agent'] }) === null) throw new Error('Work authorization rejected');
+                extras = { tokenhub: grant };
+            }
             const accountId = dependencies.bind
                 ? await dependencies.bind(origin, identity, publicKeyHex)
                 : await bindIdentity((await import('@/storage/db')).db, origin, identity, publicKeyHex);
             // Only Happy's existing signer creates the Happy session. External JWTs never become sessions.
-            const token = dependencies.token ? await dependencies.token(accountId) : await (await import('@/app/auth/auth')).auth.createToken(accountId);
+            const token = dependencies.token ? await dependencies.token(accountId, extras) : await (await import('@/app/auth/auth')).auth.createToken(accountId, extras);
             return { token };
         } catch (error) {
             // Invalid/stale state must not clear a newer browser-bound transaction.

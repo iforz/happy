@@ -86,9 +86,9 @@ class AuthModule {
         return token;
     }
     
-    async verifyToken(token: string): Promise<{ userId: string; extras?: any } | null> {
+    async verifyToken(token: string, options: { cache?: boolean } = {}): Promise<{ userId: string; extras?: any } | null> {
         // Check cache first (with TTL)
-        const cached = this.tokenCache.get(token);
+        const cached = options.cache === false ? undefined : this.tokenCache.get(token);
         if (cached) {
             if (Date.now() - cached.cachedAt > TOKEN_CACHE_TTL) {
                 this.tokenCache.delete(token);
@@ -124,11 +124,9 @@ class AuthModule {
                 }
             }
 
-            this.tokenCache.set(token, {
-                userId,
-                extras,
-                cachedAt: Date.now()
-            });
+            if (options.cache !== false) {
+                this.tokenCache.set(token, { userId, extras, cachedAt: Date.now() });
+            }
             
             return { userId, extras };
             

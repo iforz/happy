@@ -4,8 +4,19 @@ import * as privacyKit from "privacy-kit";
 import { db } from "@/storage/db";
 import { auth } from "@/app/auth/auth";
 import { log } from "@/utils/log";
+import { getWorkAuthorization, type WorkAuthorization } from '@/app/tokenhub/workAuthorization';
 
-export function authRoutes(app: Fastify) {
+export function authRoutes(app: Fastify, authorization: WorkAuthorization = getWorkAuthorization()) {
+    if (authorization.enabled) {
+        // Pairing and direct public-key login mint autonomous Happy tokens and cannot bypass Core.
+        for (const [method, url] of [
+            ['POST', '/v1/auth'], ['POST', '/v1/auth/request'], ['GET', '/v1/auth/request/status'],
+            ['POST', '/v1/auth/response'], ['POST', '/v1/auth/account/request'], ['POST', '/v1/auth/account/response'],
+        ] as const) {
+            app.route({ method, url, handler: async (_request, reply) => reply.code(403).send({ error: 'Use TokenHub unified login' }) });
+        }
+        return;
+    }
     app.post('/v1/auth', {
         schema: {
             body: z.object({

@@ -5,7 +5,8 @@ import { Server } from "socket.io";
 import { createAdapter } from "@socket.io/redis-streams-adapter";
 import { Redis } from "ioredis";
 import { log } from "@/utils/log";
-import { auth } from "@/app/auth/auth";
+import { getWorkAuthorization, type WorkAuthorization } from '@/app/tokenhub/workAuthorization';
+import { installWorkSocketAuthentication, protectWorkSocket } from '@/app/tokenhub/socketAuthorization';
 import { getMetricsLabelsFromSocket, redisStreamLagMsGauge, websocketConnectionsGauge, websocketEventsCounter } from "../monitoring/metrics2";
 import { usageHandler } from "./socket/usageHandler";
 import { rpcHandler } from "./socket/rpcHandler";
@@ -17,7 +18,7 @@ import { artifactUpdateHandler } from "./socket/artifactUpdateHandler";
 import { accessKeyHandler } from "./socket/accessKeyHandler";
 import { socketServerOptions } from "./socketConfig";
 
-export function startSocket(app: Fastify) {
+export function startSocket(app: Fastify, authorization: WorkAuthorization = getWorkAuthorization()) {
     const io = new Server(app.server, socketServerOptions);
 
     // Multi-process support: attach Redis streams adapter when REDIS_URL is set
@@ -53,48 +54,11 @@ export function startSocket(app: Fastify) {
     // event fires. Without this, the async verifyToken in the connection
     // callback creates a window where client events (rpc-register, rpc-call)
     // arrive before handlers are attached — and get silently dropped.
-    io.use(async (socket, next) => {
-        const token = socket.handshake.auth.token as string;
-        const clientType = socket.handshake.auth.clientType as 'session-scoped' | 'user-scoped' | 'machine-scoped' | undefined;
-        const sessionId = socket.handshake.auth.sessionId as string | undefined;
-        const machineId = socket.handshake.auth.machineId as string | undefined;
-
-        if (!token) {
-            log({ module: 'websocket' }, `No token provided`);
-            next(new Error('Missing authentication token'));
-            return;
-        }
-
-        if (clientType === 'session-scoped' && !sessionId) {
-            log({ module: 'websocket' }, `Session-scoped client missing sessionId`);
-            next(new Error('Session ID required for session-scoped clients'));
-            return;
-        }
-
-        if (clientType === 'machine-scoped' && !machineId) {
-            log({ module: 'websocket' }, `Machine-scoped client missing machineId`);
-            next(new Error('Machine ID required for machine-scoped clients'));
-            return;
-        }
-
-        const verified = await auth.verifyToken(token);
-        if (!verified) {
-            log({ module: 'websocket' }, `Invalid token provided`);
-            next(new Error('Invalid authentication token'));
-            return;
-        }
-
-        socket.data.userId = verified.userId;
-        socket.data.clientType = clientType;
-        socket.data.sessionId = sessionId;
-        socket.data.machineId = machineId;
-        socket.data.happyClient = socket.handshake.auth.happyClient as string
-            || socket.handshake.headers['x-happy-client'] as string
-            || undefined;
-        next();
-    });
+    installWorkSocketAuthentication(io, authorization);
 
     io.on("connection", (socket) => {
+        protectWorkSocket(socket, socket.handshake.auth.token, socket.data.workSession, authorization);
+        if (!socket.connected) return;
         const userId = socket.data.userId as string;
         const clientType = socket.data.clientType as 'session-scoped' | 'user-scoped' | 'machine-scoped' | undefined;
         const sessionId = socket.data.sessionId as string | undefined;
