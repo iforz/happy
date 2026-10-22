@@ -29,6 +29,12 @@ export interface WorkAuthorization {
     verifyToken(token: string, context?: WorkClientContext): Promise<VerifiedWorkSession | null>;
     verifyGrant(grant: TokenHubSession, context?: WorkClientContext): Promise<number | null>;
 }
+export type WorkRevocationResult = 'revoked' | 'invalid' | 'unavailable';
+export interface WorkSessionRevocation {
+    readonly enabled: boolean;
+    /** Relinquishes only the session embedded in a cryptographically verified Happy token. */
+    revokeToken(token: string): Promise<WorkRevocationResult>;
+}
 interface Binding {
     authority: string;
     issuer: string;
@@ -62,6 +68,45 @@ function isGrant(value: unknown, authority: string): value is TokenHubSession {
         && grant.authorizationToken.length <= 8192 && !/[\r\n]/.test(grant.authorizationToken);
 }
 
+/** This is only a purpose/identity filter, not JWT verification. Core alone verifies
+ * the Work signature. Never decode a caller token before verifying its signed Happy wrapper. */
+function isOwnWorkRevocationToken(grant: TokenHubSession, now: number): boolean {
+    try {
+        const parts = grant.authorizationToken.split('.');
+        if (parts.length !== 3 || parts.some(part => !/^[A-Za-z0-9_-]+$/.test(part)
+            || Buffer.from(part, 'base64url').toString('base64url') !== part)
+            || Buffer.from(parts[2], 'base64url').length !== 32) return false;
+        const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+        const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
+        const claims = JSON.parse(payload);
+        // Core versions are int64 password fingerprints, often above JS's safe integer
+        // range. Preserve JSON number lexemes while skipping every quoted JSON string.
+        // This second parse is only a lossless shape check; the original signed JWT is
+        // forwarded byte-for-byte and Core performs exact int64/signature/ownership checks.
+        const numberLiterals = JSON.parse(payload.replace(
+            /"(?:\\.|[^"\\])*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/g,
+            literal => literal.startsWith('"') ? literal : JSON.stringify(literal),
+        ));
+        const version = numberLiterals.token_version;
+        if (!header || header.alg !== 'HS256' || !claims || claims.iss !== 'tokenapi'
+            || !Array.isArray(claims.aud) || claims.aud.length !== 1 || claims.aud[0] !== 'work'
+            || claims.sub !== grant.subject || BigInt(grant.subject) > 9223372036854775807n
+            || typeof claims.sid !== 'string' || !claims.sid || claims.sid.length > 256 || /\s/.test(claims.sid)
+            || typeof claims.token_version !== 'number' || typeof version !== 'string'
+            || !/^(?:0|[1-9][0-9]*)$/.test(version) || BigInt(version) > 9223372036854775807n) return false;
+        if (![claims.exp, claims.iat, claims.nbf].every(date => Number.isSafeInteger(date) && date > 0)
+            || claims.exp < claims.iat || claims.exp < claims.nbf
+            || claims.iat > Math.floor(now / 1000) || claims.nbf > Math.floor(now / 1000)) return false;
+        // exp may be in the past: logout relinquishes authority, never grants access.
+        return true;
+    } catch { return false; }
+}
+
+function matchesBinding(binding: Binding | null, grant: TokenHubSession, userId: string): boolean {
+    return !!binding && binding.authority === grant.authority && binding.issuer === grant.issuer && binding.subject === grant.subject
+        && binding.accountId === userId && binding.account?.id === userId && binding.account.publicKey === grant.publicKey;
+}
+
 async function readResponse(response: Response, signal: AbortSignal): Promise<Record<string, unknown>> {
     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Authority unavailable');
     const reader = response.body?.getReader();
@@ -89,11 +134,12 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<Re
 }
 
 /** Construct once at API startup. Only cryptographic identity is local; authorization is never cached. */
-export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAuthorization {
+export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAuthorization & WorkSessionRevocation {
     const env = dependencies.env ?? process.env;
     if (env.TOKENHUB_UNIFIED_AUTH && !['true', 'false'].includes(env.TOKENHUB_UNIFIED_AUTH)) throw new Error('Invalid TOKENHUB_UNIFIED_AUTH');
     const enabled = env.TOKENHUB_UNIFIED_AUTH === 'true';
-    const endpoint = enabled ? authcenterOrigin(env.TOKENHUB_AUTHCENTER_URL ?? '') + '/v1/session/verify' : '';
+    const authcenter = enabled ? authcenterOrigin(env.TOKENHUB_AUTHCENTER_URL ?? '') : '';
+    const endpoint = authcenter + '/v1/session/verify';
     const authority = enabled ? trustedTokenHubOrigin(env.TOKENHUB_URL) : '';
     const now = dependencies.now ?? Date.now;
     const transport = dependencies.transport ?? fetch;
@@ -146,6 +192,48 @@ export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAu
 
     return {
         enabled, verifyGrant,
+        async revokeToken(token): Promise<WorkRevocationResult> {
+            if (!enabled) return 'unavailable'; // Never downgrade into non-unified Happy logout.
+            const controller = new AbortController();
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const revoke = async (): Promise<WorkRevocationResult> => {
+                if (typeof token !== 'string' || !token || token.length > 32768 || /\s/.test(token)) return 'invalid';
+                // Default verifier disables Happy's positive cache in unified mode. Persistent
+                // Happy token validity (including any library time checks) is never bypassed.
+                const happy = await verifyHappyToken(token);
+                if (controller.signal.aborted) return 'unavailable';
+                if (!happy || typeof happy.userId !== 'string' || !happy.userId) return 'invalid';
+                const grant = (happy.extras as { tokenhub?: unknown } | undefined)?.tokenhub;
+                if (!isGrant(grant, authority) || !isOwnWorkRevocationToken(grant, now())) return 'invalid';
+                const binding = await findBinding(authority, grant.subject);
+                if (controller.signal.aborted) return 'unavailable';
+                if (!matchesBinding(binding, grant, happy.userId)) return 'invalid';
+                // No live /verify call: disabled users, expired grants, and an already revoked
+                // session must still be able to relinquish the same signed SID at Core.
+                const response = await transport(authcenter + '/v1/session/revoke', {
+                    method: 'POST', credentials: 'omit', redirect: 'error', signal: controller.signal,
+                    headers: { Authorization: `Bearer ${grant.authorizationToken}`, 'Content-Type': 'application/json', Accept: 'application/json', 'Cache-Control': 'no-store' },
+                    body: JSON.stringify({ application: 'work' }),
+                });
+                if (response.status === 401 || response.status === 403) {
+                    void response.body?.cancel().catch(() => {});
+                    return 'invalid';
+                }
+                if (response.status !== 200) {
+                    void response.body?.cancel().catch(() => {});
+                    return 'unavailable';
+                }
+                const result = await readResponse(response, controller.signal);
+                return !controller.signal.aborted && Object.keys(result).length === 2
+                    && result.revoked === true && result.application === 'work' ? 'revoked' : 'unavailable';
+            };
+            try {
+                return await Promise.race([revoke(), new Promise<WorkRevocationResult>(resolve => {
+                    timer = setTimeout(() => { controller.abort(); resolve('unavailable'); }, AUTHCENTER_TIMEOUT_MS);
+                })]);
+            } catch { return 'unavailable'; }
+            finally { if (timer) clearTimeout(timer); controller.abort(); }
+        },
         async verifyToken(token, context) {
             const verify = async (): Promise<VerifiedWorkSession | null> => {
                 try {
@@ -159,9 +247,7 @@ export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAu
                     if (verifiedGrant === null) return null;
                     const { expiresAt, tokenhub } = verifiedGrant;
                     const binding = await findBinding(authority, grant.subject);
-                    if (!binding || binding.authority !== authority || binding.issuer !== grant.issuer || binding.subject !== grant.subject
-                        || binding.accountId !== happy.userId || binding.account?.id !== happy.userId
-                        || binding.account.publicKey !== grant.publicKey || expiresAt <= now()) return null;
+                    if (!matchesBinding(binding, grant, happy.userId) || expiresAt <= now()) return null;
                     return { userId: happy.userId, expiresAt, tokenhub };
                 } catch { return null; }
             };
@@ -175,7 +261,7 @@ export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAu
     };
 }
 
-let authorization: WorkAuthorization | undefined;
-export function getWorkAuthorization(): WorkAuthorization {
+let authorization: (WorkAuthorization & WorkSessionRevocation) | undefined;
+export function getWorkAuthorization(): WorkAuthorization & WorkSessionRevocation {
     return authorization ??= createWorkAuthorization();
 }

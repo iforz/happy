@@ -32,6 +32,7 @@ export function enableAuthentication(app: Fastify, authorization: WorkAuthorizat
         const publicEndpoints = new Set([
             'GET /v1/tokenhub/config', 'HEAD /v1/tokenhub/config',
             'POST /v1/tokenhub/start', 'POST /v1/tokenhub/complete', 'POST /v1/version',
+            'POST /v1/tokenhub/logout',
         ]);
         const unsupported = new Set([
             '/v1/connect/github/params', '/v1/connect/github/callback', '/v1/connect/github/webhook',
