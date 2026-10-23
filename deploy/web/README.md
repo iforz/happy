@@ -1,15 +1,15 @@
-# ai.iforz.cn deployment preparation
+# Work deployment preparation (work.mzyai.com)
 
 Templates only: nothing here creates credentials, installs services, changes
 firewalls, requests certificates, or publishes the site automatically.
 
-1. Use Node.js >=20 and pnpm 10.11.0. Install with `pnpm install --frozen-lockfile`.
+1. Use Node.js 24 and pnpm 10.11.0. Install with `pnpm install --frozen-lockfile`.
 2. Build the actual web client (never a harness/debug-auth bundle):
 
    ```sh
    APP_ENV=production EXPO_NO_DOTENV=1 EXPO_NO_TELEMETRY=1 EXPO_OFFLINE=1 \
    EXPO_PUBLIC_DISABLE_ANALYTICS=1 EXPO_PUBLIC_SELF_HOSTED=1 HAPPY_BUILD_TARGET=web \
-   EXPO_PUBLIC_HAPPY_SERVER_URL=https://ai.iforz.cn \
+   EXPO_PUBLIC_HAPPY_SERVER_URL=https://work.mzyai.com \
    pnpm --filter happy-app exec expo export --platform web --max-workers 2
    ```
 
@@ -17,7 +17,7 @@ firewalls, requests certificates, or publishes the site automatically.
    branding, the approved relay URL and analytics settings in an isolated build
    environment. The normal `web:local` command intentionally remains development.
 
-3. Review `ai.iforz.cn.env.example`; supply a separately approved production
+3. Review `ai.iforz.cn.env.example` as a legacy template and replace its public origin with `https://work.mzyai.com`; supply a separately approved production
    master secret outside Git. The placeholder and the local-development fixture
    are not acceptable production secrets. Keep this secret stable across restarts
    and back it up securely with the database; changing it disrupts authentication.
@@ -142,3 +142,10 @@ node dist/standalone.mjs serve
 Change the service's migration step only after database permission, credentials,
 backups and resource budget are verified. Do not reuse unrelated applications'
 databases, read their credentials, or create roles/grants without authorization.
+
+The approved Work production origin is `https://work.mzyai.com`. The isolated
+production build pins this origin even if an ambient relay variable is present.
+Legacy `ai.iforz.cn` file names are templates only; do not deploy them without
+reviewing origin, callback allowlists, proxy client context and existing state.
+`build-work-runtime.mjs` is local-only and cannot replace the Linux x64
+`package-production.mjs` artifact.

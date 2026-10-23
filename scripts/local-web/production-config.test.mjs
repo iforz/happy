@@ -11,7 +11,7 @@ test('production build pins branding, relay and privacy settings', () => {
     const env = productionWebEnvironment(root, { APP_ENV: 'development', EXPO_PUBLIC_HAPPY_SERVER_URL: 'https://other.invalid',
         EXPO_PUBLIC_DEV_TOKEN: 'fixture-only', EXPO_PUBLIC_HARNESS_DEV_SECRET: 'fixture-only', OPENAI_API_KEY: 'fixture-only' });
     assert.equal(env.APP_ENV, 'production');
-    assert.equal(env.EXPO_PUBLIC_HAPPY_SERVER_URL, 'https://ai.iforz.cn');
+    assert.equal(env.EXPO_PUBLIC_HAPPY_SERVER_URL, 'https://work.mzyai.com');
     assert.equal(env.EXPO_PUBLIC_SELF_HOSTED, '1');
     assert.equal(env.HAPPY_BUILD_TARGET, 'web');
     assert.equal(env.EXPO_PUBLIC_DISABLE_ANALYTICS, '1');
