@@ -1,9 +1,11 @@
+import { createCoreGateway, type CoreGateway } from '@/app/tokenhub/coreGateway';
+import { tokenHubCoreWorkRoutes } from './tokenHubCoreWorkRoutes';
 import { Readable } from 'node:stream';
 import { type Fastify } from '../types';
 import { createMockGateway, MOCK_MODELS, mockInput, type MockGateway, type MockIdentity } from '@/app/tokenhub/mockGateway';
 import { getWorkAuthorization, WORK_REVALIDATE_MS, type WorkAuthorization, type VerifiedWorkSession } from '@/app/tokenhub/workAuthorization';
 
-interface Dependencies { gateway?: MockGateway; authorization?: WorkAuthorization; revalidateMs?: number }
+interface Dependencies { coreGateway?: CoreGateway; gateway?: MockGateway; authorization?: WorkAuthorization; revalidateMs?: number }
 function identity(session: VerifiedWorkSession | undefined, userId: string): MockIdentity | null {
     if (!session?.tokenhub || session.userId !== userId || !session.expiresAt || session.expiresAt <= Date.now()) return null;
     return { userId, ...session.tokenhub };
@@ -11,6 +13,10 @@ function identity(session: VerifiedWorkSession | undefined, userId: string): Moc
 
 /** Isolated experimental surface; never changes Happy's ordinary providers or inference routes. */
 export function tokenHubWorkRoutes(app: Fastify, dependencies: Dependencies = {}) {
+    if (dependencies.coreGateway || process.env.TOKENHUB_GATEWAY_MODE === 'real') {
+        if (dependencies.gateway) throw new Error('Mock and real gateways are mutually exclusive');
+        return tokenHubCoreWorkRoutes(app, dependencies.coreGateway ?? createCoreGateway(), dependencies.authorization ?? getWorkAuthorization(), dependencies.revalidateMs);
+    }
     const gateway = dependencies.gateway ?? createMockGateway();
     const authorization = dependencies.authorization ?? getWorkAuthorization();
     app.get('/v1/tokenhub/work/models', { preHandler: app.authenticate }, async (request, reply) => {

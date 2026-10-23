@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     createWorkMockClient, WorkMockError, WORK_MOCK_MAX_RESPONSE_BYTES, WORK_MOCK_REQUEST_TIMEOUT_MS,
+    WORK_REAL_REQUEST_TIMEOUT_MS, WORK_REAL_MAX_RESPONSE_BYTES, WORK_REAL_MAX_LINE_LENGTH,
     type WorkMockClientOptions,
 } from './workMockClient';
 
@@ -230,4 +231,109 @@ describe('isolated Happy Work mock gateway client', () => {
     it.each(['http://127.0.0.1:3005', 'http://localhost:3005', 'http://[::1]:3005'])('permits local loopback development: %s', baseUrl => {
         expect(() => createWorkMockClient({ baseUrl, tokenProvider: async () => 'test' })).not.toThrow();
     });
+});
+
+const realCatalog = { mode: 'real', billable: true, models: [{ id: 'provider/model', name: 'Real model' }] };
+const realId = '11111111-1111-4111-8111-111111111111';
+const realInput = { model: 'provider/model', prompt: 'hello', requestId: realId };
+const realUsage = { type: 'usage', ...realInput, inputTokens: 3, outputTokens: 5, mock: false, billable: true, accounting: 'core' };
+async function realSetup(events: unknown[] = [realUsage, done]) {
+    const state = setup();
+    state.fetch.mockImplementation(async url => url.endsWith('/models')
+        ? new Response(JSON.stringify(realCatalog), { headers: { 'content-type': 'application/json' } })
+        : streamResponse(ndjson(events)));
+    await expect(state.client.getCatalog()).resolves.toEqual(realCatalog);
+    return state;
+}
+describe('opt-in real Work gateway client', () => {
+    it('sends only model, prompt and UUID, and projects Core usage as display counts', async () => {
+        const { client, fetch } = await realSetup();
+        const result = await client.stream({ ...realInput, identity: 'forbidden', apiKey: 'forbidden' } as typeof realInput, () => {});
+        expect(JSON.parse(fetch.mock.calls[1][1].body as string)).toEqual(realInput);
+        expect(result).toEqual({ model: realInput.model, requestId: realId, inputTokens: 3, outputTokens: 5, mock: false, billable: true, accounting: 'core' });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+    it.each([undefined, 'not-a-uuid', '11111111-1111-1111-1111-111111111111'])('rejects invalid real request ID %s before transport', async requestId => {
+        const { client, fetch } = await realSetup();
+        await expect(client.stream({ ...realInput, requestId }, () => {})).rejects.toMatchObject({ kind: 'invalid_request' });
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+    it('rejects a model absent from the real catalog', async () => {
+        const { client, fetch } = await realSetup();
+        await expect(client.stream({ ...realInput, model: 'not-allowed' }, () => {})).rejects.toMatchObject({ kind: 'invalid_request' });
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+        { ...realUsage, requestId: '22222222-2222-4222-8222-222222222222' },
+        { ...realUsage, accounting: undefined }, { ...realUsage, billable: false }, { ...realUsage, mock: true },
+    ])('rejects mismatched or non-authoritative usage metadata', async event => {
+        const { client } = await realSetup([event, done]);
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: 'invalid_response' });
+    });
+    it.each(['usage_unavailable', 'request_conflict', 'rate_limit', 'core_gateway_error', 'quota_exceeded', 'forbidden', 'work_reconciliation_required'])('sanitizes %s and never retries', async code => {
+        const { client, fetch } = await realSetup([{ type: 'error', code, message: 'private core diagnostic' }]);
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: code });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+    it('does not accept missing usage as completion', async () => {
+        const { client } = await realSetup([{ type: 'delta', text: 'partial paid output' }]);
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: 'truncated_stream' });
+    });
+    it.each([['access_or_quota_denied', 'forbidden'], ['rate_limited', 'rate_limit']] as const)('maps Core alias %s safely', async (code, kind) => {
+        const { client, fetch } = await realSetup([{ type: 'error', code, message: 'private' }]);
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+    it.each([[402, 'quota_exceeded'], [403, 'forbidden'], [409, 'request_conflict'], [429, 'rate_limit']] as const)('maps real HTTP %s without exposing diagnostic bodies', async (status, kind) => {
+        const { client, fetch } = await realSetup();
+        fetch.mockResolvedValue(new Response('private core diagnostic', { status }));
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind, status });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows real deltas larger than the mock line limit', async () => {
+        const onDelta = vi.fn();
+        const { client } = await realSetup([{ type: 'delta', text: 'x'.repeat(64 * 1024) }, realUsage, done]);
+        await expect(client.stream(realInput, onDelta)).resolves.toMatchObject({ accounting: 'core' });
+        expect(onDelta).toHaveBeenCalledWith('x'.repeat(64 * 1024));
+    });
+    it('bounds real response and line limits independently from mock limits', async () => {
+        const { client, fetch } = await realSetup();
+        fetch.mockResolvedValue(streamResponse('x'.repeat(WORK_REAL_MAX_LINE_LENGTH + 1)));
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: 'response_limit' });
+        const oversized = streamResponse(); oversized.headers.set('content-length', String(WORK_REAL_MAX_RESPONSE_BYTES + 1));
+        fetch.mockResolvedValue(oversized);
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: 'response_limit' });
+    });
+    it('uses the real 120-second timeout rather than the mock timeout', async () => {
+        const { client, fetch } = await realSetup();
+        vi.useFakeTimers();
+        const pending = openStream(); fetch.mockResolvedValue(pending.response);
+        const rejected = expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: 'timeout' });
+        await vi.advanceTimersByTimeAsync(WORK_MOCK_REQUEST_TIMEOUT_MS);
+        expect(pending.cancel).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(WORK_REAL_REQUEST_TIMEOUT_MS - WORK_MOCK_REQUEST_TIMEOUT_MS);
+        await rejected; expect(pending.cancel).toHaveBeenCalledOnce();
+    });
+    it('accepts bounded real catalogs larger than mock catalog limits', async () => {
+        const models = Array.from({ length: 1000 }, (_, i) => ({ id: `model-${i}`, name: `Model ${i}` }));
+        const { client } = setup(new Response(JSON.stringify({ ...realCatalog, models }), { headers: { 'content-type': 'application/json' } }));
+        expect((await client.getCatalog()).models).toHaveLength(1000);
+    });
+
+    it('projects a safe Core correlation ID separately from the client UUID', async () => {
+        const { client } = await realSetup([{ ...realUsage, coreRequestId: 'a'.repeat(64) }, done]);
+        await expect(client.stream(realInput, () => {})).resolves.toMatchObject({ requestId: realId, coreRequestId: 'a'.repeat(64) });
+    });
+    it.each(['unsafe id', 'x'.repeat(129), 123])('rejects unsafe Core correlation ID %s', async coreRequestId => {
+        const { client } = await realSetup([{ ...realUsage, coreRequestId }, done]);
+        await expect(client.stream(realInput, () => {})).rejects.toMatchObject({ kind: 'invalid_response' });
+    });
+    it('accepts empty real catalogs and 200-character names', async () => {
+        const { client, fetch } = setup(new Response(JSON.stringify({ ...realCatalog, models: [] }), { headers: { 'content-type': 'application/json' } }));
+        expect((await client.getCatalog()).models).toEqual([]);
+        fetch.mockResolvedValue(new Response(JSON.stringify({ ...realCatalog, models: [{ id: 'x'.repeat(200), name: 'n'.repeat(200) }] }), { headers: { 'content-type': 'application/json' } }));
+        expect((await client.getCatalog()).models[0].name).toHaveLength(200);
+    });
+
 });

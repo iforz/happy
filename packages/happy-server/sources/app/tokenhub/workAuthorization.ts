@@ -28,6 +28,8 @@ export interface WorkAuthorization {
     readonly enabled: boolean;
     verifyToken(token: string, context?: WorkClientContext): Promise<VerifiedWorkSession | null>;
     verifyGrant(grant: TokenHubSession, context?: WorkClientContext): Promise<number | null>;
+    /** Server-only grant extraction after all live identity checks. Never serialize this result. */
+    resolveGatewayGrant?(token: string, context?: WorkClientContext): Promise<{ session: VerifiedWorkSession; authorizationToken: string } | null>;
 }
 export type WorkRevocationResult = 'revoked' | 'invalid' | 'unavailable';
 export interface WorkSessionRevocation {
@@ -190,8 +192,38 @@ export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAu
         return (await verifyGrantDetails(grant, context))?.expiresAt ?? null;
     }
 
-    return {
+    async function resolveToken(token: string, context?: WorkClientContext): Promise<{ session: VerifiedWorkSession; authorizationToken?: string } | null> {
+        const verify = async (): Promise<{ session: VerifiedWorkSession; authorizationToken?: string } | null> => {
+            try {
+                if (typeof token !== 'string' || !token || token.length > 32768) return null;
+                const happy = await verifyHappyToken(token);
+                if (!happy || typeof happy.userId !== 'string' || !happy.userId) return null;
+                if (!enabled) return { session: { userId: happy.userId } };
+                const grant = (happy.extras as { tokenhub?: unknown } | undefined)?.tokenhub;
+                if (!isGrant(grant, authority)) return null;
+                const verifiedGrant = await verifyGrantDetails(grant, context);
+                if (verifiedGrant === null) return null;
+                const { expiresAt, tokenhub } = verifiedGrant;
+                const binding = await findBinding(authority, grant.subject);
+                if (!matchesBinding(binding, grant, happy.userId) || expiresAt <= now()) return null;
+                return { session: { userId: happy.userId, expiresAt, tokenhub }, authorizationToken: grant.authorizationToken };
+            } catch { return null; }
+        };
+        if (!enabled) return verify();
+        // Also bound local crypto/database stalls so idle rechecks cannot get stuck forever.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            return await Promise.race([verify(), new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), AUTHCENTER_TIMEOUT_MS); })]);
+        } finally { if (timer) clearTimeout(timer); }
+    }
+
+    const service: WorkAuthorization & WorkSessionRevocation = {
         enabled, verifyGrant,
+        async resolveGatewayGrant(token, context) {
+            if (!enabled) return null;
+            const result = await resolveToken(token, context);
+            return result?.authorizationToken ? { session: result.session, authorizationToken: result.authorizationToken } : null;
+        },
         async revokeToken(token): Promise<WorkRevocationResult> {
             if (!enabled) return 'unavailable'; // Never downgrade into non-unified Happy logout.
             const controller = new AbortController();
@@ -234,31 +266,9 @@ export function createWorkAuthorization(dependencies: Dependencies = {}): WorkAu
             } catch { return 'unavailable'; }
             finally { if (timer) clearTimeout(timer); controller.abort(); }
         },
-        async verifyToken(token, context) {
-            const verify = async (): Promise<VerifiedWorkSession | null> => {
-                try {
-                    if (typeof token !== 'string' || !token || token.length > 32768) return null;
-                    const happy = await verifyHappyToken(token);
-                    if (!happy || typeof happy.userId !== 'string' || !happy.userId) return null;
-                    if (!enabled) return { userId: happy.userId };
-                    const grant = (happy.extras as { tokenhub?: unknown } | undefined)?.tokenhub;
-                    if (!isGrant(grant, authority)) return null;
-                    const verifiedGrant = await verifyGrantDetails(grant, context);
-                    if (verifiedGrant === null) return null;
-                    const { expiresAt, tokenhub } = verifiedGrant;
-                    const binding = await findBinding(authority, grant.subject);
-                    if (!matchesBinding(binding, grant, happy.userId) || expiresAt <= now()) return null;
-                    return { userId: happy.userId, expiresAt, tokenhub };
-                } catch { return null; }
-            };
-            if (!enabled) return verify();
-            // Also bound local crypto/database stalls so idle rechecks cannot get stuck forever.
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            try {
-                return await Promise.race([verify(), new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), AUTHCENTER_TIMEOUT_MS); })]);
-            } finally { if (timer) clearTimeout(timer); }
-        },
+        async verifyToken(token, context) { return (await resolveToken(token, context))?.session ?? null; },
     };
+    return service;
 }
 
 let authorization: (WorkAuthorization & WorkSessionRevocation) | undefined;

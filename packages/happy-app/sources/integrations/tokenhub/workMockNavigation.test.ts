@@ -14,6 +14,7 @@ vi.mock('react-native', () => ({
     Animated: { Value: class { setValue() {} } }, Image: 'Image',
     Pressable: 'Pressable', ScrollView: 'ScrollView', Text: 'Text', TextInput: 'TextInput', View: 'View',
 }));
+vi.mock('expo-crypto', () => ({ randomUUID: () => '11111111-1111-4111-8111-111111111111' }));
 vi.mock('expo-router', () => ({ Stack: { Screen: () => null }, useRouter: () => ({ replace: fixture.replace }) }));
 vi.mock('@/auth/AuthContext', () => ({ useAuth: () => ({ credentials: fixture.credentials }) }));
 vi.mock('@/sync/serverConfig', () => ({ getServerUrl: () => 'https://happy-ui.example.test' }));
