@@ -128,6 +128,16 @@ export function TokenHubConversation() {
         {storageError?<Text accessibilityRole="alert" style={{color:theme.colors.text}}>{storageError}</Text>:null}
         {!loading&&!validModel&&model?<Text accessibilityRole="alert" style={{color:theme.colors.text}}>{t('unavailable')}</Text>:null}
         {!busy?link(t('reload'),()=>setReload(value=>value+1)):null}
+        {catalog?.models.length ? <View style={{gap:6}}>
+            <Text style={{color:theme.colors.textSecondary}}>{t('models')}</Text>
+            <ScrollView horizontal style={{maxHeight:48}} contentContainerStyle={{gap:8}}>
+                {catalog.models.map(item=><Pressable key={item.id} accessibilityRole="radio" accessibilityState={{checked:model===item.id,disabled:busy}} disabled={busy}
+                    onPress={()=>{if(selectedModelAllowed(catalog,item.id))setModel(item.id);}}
+                    style={{padding:10,borderWidth:1,borderRadius:8,borderColor:theme.colors.textSecondary,backgroundColor:model===item.id?theme.colors.surfacePressed:'transparent'}}>
+                    <Text style={{color:theme.colors.text,fontWeight:model===item.id?'600':'400'}}>{item.name}</Text>
+                </Pressable>)}
+            </ScrollView>
+        </View> : null}
         <ScrollView style={{flex:1}} contentContainerStyle={{gap:16,paddingVertical:12}}>
             {current?.turns.map((turn,index)=><View key={index} style={{gap:8}}>
                 <Text style={{fontWeight:'600',color:theme.colors.text}}>{t('user')}</Text><Text selectable style={{color:theme.colors.text}}>{turn.user}</Text>
