@@ -1,3 +1,4 @@
+import { workClientContext } from '@/app/tokenhub/clientContext';
 import { createCoreGateway, type CoreGateway } from '@/app/tokenhub/coreGateway';
 import { tokenHubCoreWorkRoutes } from './tokenHubCoreWorkRoutes';
 import { Readable } from 'node:stream';
@@ -41,7 +42,7 @@ export function tokenHubWorkRoutes(app: Fastify, dependencies: Dependencies = {}
             if (checking || controller.signal.aborted) return;
             checking = true;
             try {
-                const current = await authorization.verifyToken(token, { ip: request.ip, userAgent: request.headers['user-agent'] });
+                const current = await authorization.verifyToken(token, workClientContext(request.raw));
                 const currentIdentity = identity(current ?? undefined, request.userId);
                 if (!currentIdentity || Object.keys(verifiedIdentity).some(key => currentIdentity[key as keyof MockIdentity] !== verifiedIdentity[key as keyof MockIdentity])) controller.abort('authorization_revoked');
             } catch { controller.abort('authorization_revoked'); }

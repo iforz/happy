@@ -1,3 +1,4 @@
+import { workClientContext } from './clientContext';
 import type { Server, Socket } from 'socket.io';
 import { WORK_REVALIDATE_MS, type VerifiedWorkSession, type WorkAuthorization } from './workAuthorization';
 
@@ -9,7 +10,7 @@ export function installWorkSocketAuthentication(io: Server, authorization: WorkA
         if (clientType === 'session-scoped' && (typeof sessionId !== 'string' || !sessionId)) return next(new Error('Session ID required for session-scoped clients'));
         if (clientType === 'machine-scoped' && (typeof machineId !== 'string' || !machineId)) return next(new Error('Machine ID required for machine-scoped clients'));
         try {
-            const verified = await authorization.verifyToken(token, { ip: socket.handshake.address, userAgent: socket.handshake.headers['user-agent'] });
+            const verified = await authorization.verifyToken(token, workClientContext(socket.request));
             if (!verified) return next(new Error('Invalid authentication token'));
             socket.data.userId = verified.userId;
             socket.data.workSession = verified;
@@ -51,7 +52,9 @@ export function protectWorkSocket(socket: Socket, token: string, initial: Verifi
     }
     async function reauthorize(): Promise<boolean> {
         if (stopped) return false;
-        const verified = await authorization.verifyToken(token, { ip: socket.handshake.address, userAgent: socket.handshake.headers['user-agent'] }).catch(() => null);
+        let verified: VerifiedWorkSession | null;
+        try { verified = await authorization.verifyToken(token, workClientContext(socket.request)); }
+        catch { verified = null; }
         if (stopped) return false;
         if (!verified || verified.userId !== initial.userId || !verified.expiresAt || verified.expiresAt <= Date.now()) {
             reject(); return false;

@@ -1,3 +1,4 @@
+import { workClientContext } from '@/app/tokenhub/clientContext';
 import { Fastify } from "../types";
 import { debug } from "@/utils/log";
 import { getWorkAuthorization, type WorkAuthorization } from '@/app/tokenhub/workAuthorization';
@@ -14,7 +15,7 @@ export function enableAuthentication(app: Fastify, authorization: WorkAuthorizat
             }
 
             const token = authHeader.substring(7);
-            const verified = await authorization.verifyToken(token, { ip: request.ip, userAgent: request.headers['user-agent'] });
+            const verified = await authorization.verifyToken(token, workClientContext(request.raw));
             if (!verified) {
                 debug({ module: 'auth' }, 'auth:failed reason=invalid-token');
                 return reply.code(401).send({ error: 'Invalid token' });

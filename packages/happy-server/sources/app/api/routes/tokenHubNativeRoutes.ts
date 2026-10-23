@@ -1,3 +1,4 @@
+import { workClientContext } from '@/app/tokenhub/clientContext';
 import { z } from 'zod';
 import type { Fastify } from '../types';
 import type { TokenHubRouteDependencies } from './tokenHubRoutes';
@@ -104,7 +105,7 @@ export function tokenHubNativeRoutes(app: Fastify, dependencies: TokenHubRouteDe
         if (!enabled() || !authorization.enabled) return reply.code(401).send({ error: 'Session authority is unavailable' });
         const header = request.headers.authorization;
         const session = request.workSession ?? (typeof header === 'string' && header.startsWith('Bearer ')
-            ? await authorization.verifyToken(header.slice(7), { ip: request.ip, userAgent: request.headers['user-agent'] }) : null);
+            ? await authorization.verifyToken(header.slice(7), workClientContext(request.raw)) : null);
         if (!session) return reply.code(401).send({ error: 'Session expired or revoked' });
         return { active: true, expiresAt: session.expiresAt ?? null, refresh: 'reauthenticate' as const };
     });

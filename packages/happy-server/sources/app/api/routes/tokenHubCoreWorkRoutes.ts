@@ -1,3 +1,4 @@
+import { workClientContext } from '@/app/tokenhub/clientContext';
 import { Readable } from 'node:stream';
 import type { Fastify } from '../types';
 import { coreInput, CoreGatewayError, type CoreGateway } from '@/app/tokenhub/coreGateway';
@@ -12,7 +13,7 @@ export function tokenHubCoreWorkRoutes(app: Fastify, gateway: CoreGateway, autho
     app.get('/v1/tokenhub/work/models', { preHandler: app.authenticate }, async (request, reply) => {
         reply.header('Cache-Control', 'no-store');
         if (!gateway.enabled || !authorization.enabled || !authorization.resolveGatewayGrant) return reply.code(503).send({ error: 'Work gateway is disabled' });
-        const context = { ip: request.ip, userAgent: request.headers['user-agent'] };
+        const context = workClientContext(request.raw);
         const grant = await authorization.resolveGatewayGrant(request.headers.authorization!.slice(7), context);
         if (!grant || !request.workSession || !sameSession(request.workSession, grant.session)) return reply.code(401).send({ error: 'Work authorization unavailable' });
         const controller = new AbortController(), abort = () => controller.abort();
@@ -25,7 +26,7 @@ export function tokenHubCoreWorkRoutes(app: Fastify, gateway: CoreGateway, autho
     app.post('/v1/tokenhub/work/stream', { preHandler: app.authenticate, bodyLimit: 32768, schema: { body: coreInput } }, async (request, reply) => {
         reply.header('Cache-Control', 'no-store');
         if (!gateway.enabled || !authorization.enabled || !authorization.resolveGatewayGrant) return reply.code(503).send({ error: 'Work gateway is disabled' });
-        const token = request.headers.authorization!.slice(7), context = { ip: request.ip, userAgent: request.headers['user-agent'] };
+        const token = request.headers.authorization!.slice(7), context = workClientContext(request.raw);
         const grant = await authorization.resolveGatewayGrant(token, context);
         if (!grant || !request.workSession || !sameSession(request.workSession, grant.session)
             || !grant.session.expiresAt || grant.session.expiresAt <= Date.now()) return reply.code(401).send({ error: 'Work authorization unavailable' });

@@ -1,3 +1,4 @@
+import { workClientContext } from '@/app/tokenhub/clientContext';
 import { z } from 'zod';
 import { type Fastify } from '../types';
 import { LoginFlows, authorizationUrl, verifyHappyProof, verifyIdentity } from '@/app/tokenhub/flow';
@@ -71,7 +72,7 @@ export function tokenHubRoutes(app: Fastify, dependencies: TokenHubRouteDependen
                 if (typeof result.authorization_token !== 'string') throw new Error('Missing authorization token');
                 const grant = { authorizationToken: result.authorization_token, authority: origin, ...identity, publicKey: publicKeyHex };
                 // Validate the grant before creating/binding an account. Never accept a decoded JWT as authority.
-                if (await authorization.verifyGrant(grant, { ip: request.ip, userAgent: request.headers['user-agent'] }) === null) throw new Error('Work authorization rejected');
+                if (await authorization.verifyGrant(grant, workClientContext(request.raw)) === null) throw new Error('Work authorization rejected');
                 extras = { tokenhub: grant };
             }
             const accountId = dependencies.bind

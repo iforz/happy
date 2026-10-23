@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { productionWebEnvironment } from './production-config.mjs';
+import { productionWebEnvironment, productionOrigin } from './production-config.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 test('production build pins branding, relay and privacy settings', () => {
@@ -47,3 +47,8 @@ test('all explicitly registered app stack screens have actual route files', () =
     }
     assert.ok(!routes.includes('dev/masked-progress'));
 });
+
+ test('explicit production origin accepts only exact public HTTPS origins', () => {
+ assert.equal(productionWebEnvironment(root,{HAPPY_PRODUCTION_ORIGIN:'https://work.iforz.cn'}).EXPO_PUBLIC_HAPPY_SERVER_URL,'https://work.iforz.cn');
+ for(const raw of ['http://work.iforz.cn','https://work.iforz.cn/','https://work.iforz.cn/path','https://user@work.iforz.cn','https://work.iforz.cn?x=1','https://work.iforz.cn#x','https://127.0.0.1','https://localhost','https://work.localhost',' https://work.iforz.cn']) assert.throws(()=>productionOrigin(raw));
+ });

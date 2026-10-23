@@ -6,8 +6,9 @@ import { WORK_REVALIDATE_MS, type WorkAuthorization } from './workAuthorization'
 
 function setup(expiresIn = 60_000) {
     vi.useFakeTimers();
-    const socket = new EventEmitter() as EventEmitter & { use: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; handshake: unknown };
+    const socket = new EventEmitter() as EventEmitter & { use: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; handshake: unknown; request: unknown };
     socket.handshake = { address: '127.0.0.1', headers: { 'user-agent': 'test' } };
+    socket.request = { socket: { remoteAddress: '127.0.0.1' }, headers: { 'user-agent': 'test' } };
     socket.use = vi.fn(); socket.disconnect = vi.fn(() => socket.emit('disconnect'));
     const initial = { userId: 'happy-a', expiresAt: Date.now() + expiresIn };
     const verifyToken = vi.fn().mockResolvedValue(initial);

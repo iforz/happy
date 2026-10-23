@@ -149,3 +149,23 @@ Legacy `ai.iforz.cn` file names are templates only; do not deploy them without
 reviewing origin, callback allowlists, proxy client context and existing state.
 `build-work-runtime.mjs` is local-only and cannot replace the Linux x64
 `package-production.mjs` artifact.
+
+## Explicit production domain and loopback reverse proxy
+
+Set `HAPPY_PRODUCTION_ORIGIN=https://work.iforz.cn` when invoking
+`pnpm web:build:selfhost`. This exact public HTTPS origin overrides the default
+`https://work.mzyai.com`; ambient `EXPO_PUBLIC_HAPPY_SERVER_URL` is ignored.
+Paths, credentials, IP literals and trailing slash are rejected. The runtime
+`HAPPY_PUBLIC_ORIGIN`, `PUBLIC_URL` and configured SSO callback must match the
+chosen origin. Changing domain does not authorize replacing existing data or
+regenerating its matching `HANDY_MASTER_SECRET`.
+
+For a reviewed single local Nginx hop, bind Work to loopback and explicitly set
+`TOKENHUB_TRUST_LOOPBACK_PROXY=true`. Nginx must overwrite `X-Real-IP` with
+`$remote_addr` for both HTTP and WebSocket requests. Work only reads this one
+validated address when the actual TCP peer is literal loopback; external peers
+cannot choose their IP using headers. Missing, multiple or malformed addresses
+fail closed. `X-Forwarded-For` and `X-Client-IP` never select Work identity.
+Keep this option off for direct local access. Do not enable blanket Fastify proxy
+trust. Core must resolve the same browser IP and User-Agent when authorizing the
+original login; PKCE exchange preserves that original Core binding.
