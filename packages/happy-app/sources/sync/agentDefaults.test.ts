@@ -47,18 +47,18 @@ describe('agent defaults', () => {
         ).permissionMode).toBe('auto');
     });
 
-    it.each(['1.2.6-beta.0', '1.2.6-beta.1', '1.2.6', '1.3.0'])('defaults Claude to Opus 5.5 on CLI %s', (version) => {
-        expect(getCodeAgentDefaults('claude', version).modelMode).toBe('claude-opus-5-5');
-        expect(resolveAgentDefaultConfig({}, 'claude', version).modelMode).toBe('claude-opus-5-5');
+    it.each(['1.2.6-beta.0', '1.2.6-beta.1', '1.2.6', '1.3.0'])('has no predefined Claude model on CLI %s', (version) => {
+        expect(getCodeAgentDefaults('claude', version).modelMode).toBe('');
+        expect(resolveAgentDefaultConfig({}, 'claude', version).modelMode).toBe('');
     });
 
     // Unlike the auto gate, an unknown version keeps the old model: an Opus 5.5
     // default on a CLI whose bundled Claude Code predates it fails every turn.
     it.each(['1.2.5', '1.2.5-beta.2', '1.2.0', 'not-a-version', undefined, null])(
-        'keeps Claude on Opus 5 on CLI %s',
+        'has no model fallback on CLI %s',
         (version) => {
-            expect(getCodeAgentDefaults('claude', version).modelMode).toBe('claude-opus-5');
-            expect(resolveAgentDefaultConfig({}, 'claude', version).modelMode).toBe('claude-opus-5');
+            expect(getCodeAgentDefaults('claude', version).modelMode).toBe('');
+            expect(resolveAgentDefaultConfig({}, 'claude', version).modelMode).toBe('');
         },
     );
 
@@ -98,8 +98,8 @@ describe('agent defaults', () => {
     });
 
     it('does not gate other agents\' default models on the CLI version', () => {
-        expect(getCodeAgentDefaults('codex', '1.2.0').modelMode).toBe('gpt-6.1-sol');
-        expect(getCodeAgentDefaults('agy').modelMode).toBe('Gemini 3.8 Flash');
+        expect(getCodeAgentDefaults('codex', '1.2.0').modelMode).toBe('');
+        expect(getCodeAgentDefaults('agy').modelMode).toBe('');
     });
 
     it('does not change non-code-agent defaults for an old CLI', () => {

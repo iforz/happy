@@ -1,3 +1,4 @@
+import { resolveLanguageTag } from '@/text/_all';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Item } from '@/components/Item';
@@ -25,10 +26,8 @@ export default function LanguageSettingsScreen() {
 
     // Get device locale for automatic detection
     const deviceLocale = Localization.getLocales()?.[0]?.languageTag ?? 'en-US';
-    const deviceLanguage = deviceLocale.split('-')[0].toLowerCase();
-    const detectedLanguageName = deviceLanguage in SUPPORTED_LANGUAGES ? 
-                                 getLanguageNativeName(deviceLanguage as keyof typeof SUPPORTED_LANGUAGES) : 
-                                 getLanguageNativeName('en');
+    const deviceLanguage = resolveLanguageTag(deviceLocale);
+    const detectedLanguageName = getLanguageNativeName(deviceLanguage);
 
     // Current selection
     const currentSelection: LanguageOption = preferredLanguage === null ? 'auto' : 

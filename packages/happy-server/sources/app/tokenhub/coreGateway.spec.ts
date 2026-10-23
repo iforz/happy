@@ -102,3 +102,12 @@ it('passes actual relay events through the actual App client while keeping clien
     const result = await client.stream({ model: 'real-model', prompt: 'Hi', requestId: id }, () => {});
     expect(result).toMatchObject({ requestId: id, coreRequestId: coreId, accounting: 'core', mock: false, inputTokens: 3 });
 });
+
+it('preserves full multi-turn roles with the exact selected model and existing accounting path',async()=>{
+ const f=await fixture();
+ const messages=[{role:'user' as const,content:'first'},{role:'assistant' as const,content:'answer'},{role:'user' as const,content:'follow up'}];
+ const events=[];for await(const event of f.gateway.stream({model:'real-model',messages,requestId:'60a399cd-f49f-4064-8fe6-46d2d6d9c0d0'},'verified-core-grant',{},new AbortController().signal))events.push(event);
+ expect(JSON.parse(f.calls[0].body).messages).toEqual(messages);
+ expect(f.calls[0].headers['x-work-request-id']).toBe('60a399cd-f49f-4064-8fe6-46d2d6d9c0d0');
+ expect(events.some(event=>event.type==='done')).toBe(true);
+});

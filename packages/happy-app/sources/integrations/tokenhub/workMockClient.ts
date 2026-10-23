@@ -10,6 +10,8 @@ const MAX_LINE_LENGTH = 16 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MODEL_IDS = ['mock-echo', 'mock-slow', 'mock-error'] as const;
 export type WorkMockModelId = typeof MODEL_IDS[number];
+export interface WorkMessage { role: 'user' | 'assistant'; content: string }
+export interface WorkChatInput { model: string; prompt?: string; messages?: WorkMessage[]; requestId?: string }
 export interface WorkMockModel { id: string; name: string }
 export interface WorkModelCatalog { mode: 'mock' | 'real'; billable: boolean; models: WorkMockModel[] }
 export interface WorkMockUsage {
@@ -36,6 +38,7 @@ export class WorkMockError extends Error {
 export interface WorkMockClientOptions {
     /** The existing application's selected Happy server, never a browser-entered gateway URL. */
     baseUrl: string;
+    requireRealCatalog?: boolean;
     /** Existing Happy auth token only. Never pass the encryption secret or a TokenHub API key. */
     tokenProvider: () => Promise<string | null>;
     fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -114,7 +117,7 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
 
     let catalog: WorkModelCatalog | undefined;
 
-    async function request<T>(path: string, body: { model: string; prompt: string; requestId?: string } | undefined,
+    async function request<T>(path: string, body: WorkChatInput | undefined,
         callerSignal: AbortSignal | undefined, consume: (response: Response, signal: AbortSignal) => Promise<T>): Promise<T> {
         if (callerSignal?.aborted) throw new WorkMockError('aborted');
         const controller = new AbortController();
@@ -137,7 +140,7 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
                 },
                 credentials: 'omit', redirect: 'error', cache: 'no-store',
                 // The request shape is constructed here, never spread from caller-owned input.
-                ...(body ? { body: JSON.stringify({ model: body.model, prompt: body.prompt, ...(body.requestId ? { requestId: body.requestId } : {}) }) } : {}),
+                ...(body ? { body: JSON.stringify({ model: body.model, ...(body.messages ? { messages: body.messages.map(({role, content}) => ({role, content})) } : { prompt: body.prompt }), ...(body.requestId ? { requestId: body.requestId } : {}) }) } : {}),
                 signal: controller.signal,
             });
             // A nonconforming transport might resolve after abort. Do not leave its body open.
@@ -167,6 +170,7 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
 
     async function getCatalog(signal?: AbortSignal): Promise<WorkModelCatalog> {
         catalog = undefined;
+        catalog = undefined;
         return request('models', undefined, signal, async (response, requestSignal) => {
             let text = '';
             for await (const chunk of textChunks(response, requestSignal, MAX_CATALOG_BYTES)) text += chunk;
@@ -187,22 +191,24 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
                 ids.add(model.id);
                 return { id: model.id, name: model.name };
             });
-            catalog = { mode: value.mode as 'mock' | 'real', billable: value.billable as boolean, models };
+            catalog = { mode: value.mode as 'mock' | 'real', billable: value.billable as boolean, models: models.filter(model => model.id !== 'default') };
             return catalog;
         });
     }
     return {
         getCatalog,
         async listModels(signal?: AbortSignal): Promise<WorkMockModel[]> { return (await getCatalog(signal)).models; },
-        async stream(input: { model: string; prompt: string; requestId?: string }, onDelta: (text: string) => void, signal?: AbortSignal): Promise<WorkMockUsage> {
+        async stream(input: WorkChatInput, onDelta: (text: string) => void, signal?: AbortSignal): Promise<WorkMockUsage> {
+            if (options.requireRealCatalog && (!catalog || catalog.mode !== 'real')) throw new WorkMockError('configuration');
             const real = catalog?.mode === 'real';
             const lineLimit = real ? WORK_REAL_MAX_LINE_LENGTH : MAX_LINE_LENGTH;
             const responseLimit = real ? WORK_REAL_MAX_RESPONSE_BYTES : WORK_MOCK_MAX_RESPONSE_BYTES;
+            const validHistory = real && Array.isArray(input.messages) && input.messages.length > 0 && input.messages.length <= 49 && input.messages.length % 2 === 1 && input.messages.every((m, i) => m.role === (i % 2 ? 'assistant' : 'user') && typeof m.content === 'string' && m.content.trim()) && input.messages.reduce((n, m) => n + m.content.length, 0) <= 16000
+            const validPrompt = typeof input.prompt === 'string' && !!input.prompt.trim() && input.prompt.length <= WORK_MOCK_MAX_PROMPT_LENGTH
             if (!(catalog ? catalog.models.some(model => model.id === input.model) : validModel(input.model))
                 || (real && (typeof input.requestId !== 'string' || !UUID.test(input.requestId)))
-                || typeof input.prompt !== 'string' || !input.prompt.trim()
-                || input.prompt.length > WORK_MOCK_MAX_PROMPT_LENGTH) throw new WorkMockError('invalid_request');
-            return request('stream', { model: input.model, prompt: input.prompt, ...(real ? { requestId: input.requestId } : {}) }, signal, async (response, requestSignal) => {
+                || (input.messages !== undefined ? !validHistory || input.prompt !== undefined : !validPrompt)) throw new WorkMockError('invalid_request');
+            return request('stream', { model: input.model, ...(input.messages ? { messages: input.messages } : { prompt: input.prompt }), ...(real ? { requestId: input.requestId } : {}) }, signal, async (response, requestSignal) => {
                 let buffer = '';
                 let usage: WorkMockUsage | undefined;
                 let done = false;

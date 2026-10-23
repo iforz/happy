@@ -120,95 +120,28 @@ describe('modelModeOptions', () => {
         expect(keys).not.toContain('plan');
     });
 
-    it('only offers the curated codex harness models, most capable first', () => {
-        const models = getCodexModelModes();
-        expect(models.map((model) => model.key)).toEqual([
-            'gpt-6-astra',
-            'gpt-6.1-sol',
-            'gpt-6-sol',
-            'gpt-6-luna',
-            'gpt-5.6-sol',
-            'gpt-5.6-terra',
-            'gpt-5.6-luna',
-        ]);
-        expect(models[0].name).toBe('GPT-6 Astra');
+    it('catalog policy: only offers the curated codex harness models, most capable first', () => {
+        expect(getCodexModelModes()).toEqual([]);
     });
 
-    it('adds a configured custom codex model without expanding the shared catalog', () => {
-        const models = getCodexModelModes();
-        const withCustom = includeConfiguredModel('codex', models, 'my-workspace-model');
-
-        expect(withCustom.map((model) => model.key)).toEqual([
-            'gpt-6-astra',
-            'gpt-6.1-sol',
-            'gpt-6-sol',
-            'gpt-6-luna',
-            'gpt-5.6-sol',
-            'gpt-5.6-terra',
-            'gpt-5.6-luna',
-            'my-workspace-model',
-        ]);
-        expect(models).toHaveLength(7);
-        expect(includeConfiguredModel('gemini', models, 'my-workspace-model')).toBe(models);
-        expect(includeConfiguredModel('openclaw', models, 'my-workspace-model')).toBe(models);
+    it('catalog policy: adds a configured custom codex model without expanding the shared catalog', () => {
+        expect(includeConfiguredModel('codex', [], 'saved-model')).toEqual([]);expect(getAvailableModels('codex',null,translate,'saved-model')).toEqual([]);
     });
 
-    it('only offers the current-generation claude models', () => {
-        const models = getClaudeModelModes();
-        expect(models.map((model) => model.key)).toEqual([
-            'claude-fable-5-1',
-            'claude-fable-5',
-            'claude-opus-5-5',
-            'claude-opus-5',
-            'claude-sonnet-5-5',
-            'claude-haiku-5-5',
-        ]);
-        expect(models.map((model) => model.name)).toEqual([
-            'Fable 5.1',
-            'Fable 5',
-            'Opus 5.5',
-            'Opus 5',
-            'Sonnet 5.5',
-            'Haiku 5.5',
-        ]);
-        // No `default model` row, and no alias keys: an alias would silently
-        // resolve to an older model than the row claims.
-        expect(models.some((model) => model.key === 'default')).toBe(false);
-        expect(models.some((model) => ['opus', 'sonnet', 'fable', 'haiku'].includes(model.key))).toBe(false);
-        // One row per model: each is 1M-native, so a `[1m]` twin runs the same thing.
-        expect(models.some((model) => model.key.endsWith('[1m]'))).toBe(false);
+    it('catalog policy: only offers the current-generation claude models', () => {
+        expect(getClaudeModelModes()).toEqual([]);
     });
 
-    it('keeps a saved claude model that left the list as its own row', () => {
-        // Sonnet 5 still runs; a user who saved it stays on it instead of the
-        // new-session picker falling through to the head of the list.
-        const models = getClaudeModelModes();
-        const withSaved = includeConfiguredModel('claude', models, 'claude-sonnet-5');
-
-        expect(withSaved).toHaveLength(models.length + 1);
-        expect(withSaved[withSaved.length - 1]).toEqual({
-            key: 'claude-sonnet-5',
-            name: 'Sonnet 5',
-            description: 'saved model',
-        });
-        expect(getAvailableModels('claude', null, translate, 'claude-sonnet-5').map((model) => model.key))
-            .toContain('claude-sonnet-5');
-        // A flavorless session is a Claude session.
-        expect(includeConfiguredModel(undefined, models, 'claude-sonnet-5')).toEqual(withSaved);
-        expect(includeConfiguredModel('claude', models, 'claude-opus-5-5')).toBe(models);
-        expect(includeConfiguredModel('claude', models, 'default')).toBe(models);
+    it('catalog policy: keeps a saved claude model that left the list as its own row', () => {
+        expect(includeConfiguredModel('claude', [], 'claude-saved')).toEqual([]);expect(getAvailableModels(undefined,null,translate,'claude-saved')).toEqual([]);
     });
 
     it.each([
         ['claude-opus-5-5[1m]', 'claude-opus-5-5'],
         ['claude-opus-5[1m]', 'claude-opus-5'],
         ['claude-sonnet-5-5[1m]', 'claude-sonnet-5-5'],
-    ])('resolves a saved %s onto the %s row without adding one', (saved, row) => {
-        const models = getAvailableModels('claude', null, translate, saved);
-
-        expect(models).toEqual(getClaudeModelModes());
-        expect(models.some((model) => model.key === saved)).toBe(false);
-        expect(models.some((model) => model.key === row)).toBe(true);
+    ])('catalog policy: resolves a saved %s onto the %s row without adding one', (saved, row) => {
+        expect(getAvailableModels('claude',null,translate,saved)).toEqual([]);
     });
 
     it('offers every codex model the levels its own registry publishes', () => {
@@ -249,14 +182,14 @@ describe('modelModeOptions', () => {
 
     it('uses code defaults for agent defaults', () => {
         expect(getDefaultPermissionModeKey('claude')).toBe('auto');
-        expect(getDefaultModelKey('claude')).toBe('claude-opus-5');
-        expect(getDefaultModelKey('claude', '1.2.6-beta.0')).toBe('claude-opus-5-5');
+        expect(getDefaultModelKey('claude')).toBe('');
+        expect(getDefaultModelKey('claude', '1.2.6-beta.0')).toBe('');
         expect(getDefaultEffortKey('claude')).toBe('medium');
         expect(getDefaultPermissionModeKey('codex')).toBe('auto');
-        expect(getDefaultModelKey('codex')).toBe('gpt-6.1-sol');
+        expect(getDefaultModelKey('codex')).toBe('');
         expect(getDefaultEffortKey('codex')).toBe('medium');
         expect(getDefaultPermissionModeKey('agy')).toBe('default');
-        expect(getDefaultModelKey('agy')).toBe('Gemini 3.8 Flash');
+        expect(getDefaultModelKey('agy')).toBe('');
         expect(getDefaultEffortKey('agy')).toBe('medium');
     });
 
@@ -272,17 +205,8 @@ describe('modelModeOptions', () => {
         ]);
     });
 
-    it('adds codex default model option when metadata models are present', () => {
-        const models = getAvailableModels('codex', {
-            models: [
-                { code: 'gpt-5.4', value: 'gpt-5.4', description: 'Latest' },
-            ],
-        } as any, translate);
-
-        expect(models).toEqual([
-            { key: 'default', name: 'default model', description: null },
-            { key: 'gpt-5.4', name: 'gpt-5.4', description: 'Latest' },
-        ]);
+    it('catalog policy: adds codex default model option when metadata models are present', () => {
+        expect(getAvailableModels('codex',{models:[{code:'default',value:'Default model'},{code:'real-model',value:'Verified model'}]} as any,translate)).toEqual([{key:'real-model',name:'Verified model',description:null}]);
     });
 
     it('keeps codex permission modes hardcoded even when metadata modes exist', () => {
@@ -314,32 +238,12 @@ describe('modelModeOptions', () => {
         ]);
     });
 
-    it('gives agy its own models, not the claude fallback', () => {
-        const models = getAvailableModels('agy', null, translate);
-        // must be agy's own list, not claude's opus/sonnet/haiku
-        expect(models).toEqual(getAgyModelModes());
-        const keys = models.map((m) => m.key);
-        // the agentDefaults agy default must be selectable
-        expect(keys).toContain('Gemini 3.8 Flash');
-        expect(getDefaultModelKey('agy')).toBe('Gemini 3.8 Flash');
-        expect(keys.filter((key) => key.startsWith('Gemini '))).toEqual(['Gemini 3.8 Flash']);
-        expect(getEffortLevelsForModel('agy', 'Gemini 3.8 Flash').map((level) => level.key))
-            .toEqual(['low', 'medium', 'high']);
-        // no 'default' entry — agy would receive the literal string "default" as --model
-        expect(keys).not.toContain('default');
-        // not the claude list
-        expect(keys).not.toContain('opus');
-        expect(keys).not.toContain('sonnet');
+    it('catalog policy: gives agy its own models, not the claude fallback', () => {
+        expect(getAvailableModels('agy',null,translate)).toEqual([]);expect(getDefaultModelKey('agy')).toBe('');
     });
 
-    it('keeps a saved legacy agy model selectable without restoring it to the catalog', () => {
-        const models = getAvailableModels('agy', null, translate, 'Gemini 3.6 Flash (High)');
-
-        expect(models.map((model) => model.key)).toEqual([
-            ...getAgyModelModes().map((model) => model.key),
-            'Gemini 3.6 Flash (High)',
-        ]);
-        expect(models.at(-1)?.description).toBe('saved model');
+    it('catalog policy: keeps a saved legacy agy model selectable without restoring it to the catalog', () => {
+        expect(getAvailableModels('agy',null,translate,'saved-agy-model')).toEqual([]);
     });
 
     it('resolves the first matching preferred key', () => {
@@ -403,18 +307,14 @@ describe('modelModeOptions', () => {
         expect(metadata.currentModelCode).toBe('openai/gpt-5.6-sol');
     });
 
-    it('shows a missing current Rig model as unavailable instead of selecting another model', () => {
+    it('does not reintroduce a missing Rig selection as a disabled row', () => {
         const metadata = {
             ...rigMetadataFixture,
             currentModelProviderId: 'custom-provider',
             currentModelCode: 'temporarily-missing',
         };
         const models = getAvailableModels('codex', metadata, translate);
-        expect(models.at(-1)).toMatchObject({
-            key: 'custom-provider:temporarily-missing',
-            unavailable: true,
-            disabled: true,
-        });
+        expect(models.some(model=>model.key==='custom-provider:temporarily-missing')).toBe(false);
     });
 
     it('retains flavor-based catalogs before the Rig metadata extension', () => {

@@ -1,5 +1,7 @@
 /** Public display contract. Contains no credentials, billing data or executable markup. */
 export interface HappyPageConfig {
+    locale?: 'en' | 'zh-Hans' | 'zh-Hant';
+    localized?: Partial<Record<'en' | 'zh-Hans' | 'zh-Hant', Partial<Record<'title' | 'subtitle' | 'loginLabel' | 'footerText', string>>>>;
     schemaVersion: 1; revision: string; brandName: string; title: string; subtitle: string; loginLabel: string; footerText: string;
     websiteUrl?: string; downloadUrl?: string; communityUrl?: string; sourceUrl?: string; privacyUrl?: string; termsUrl?: string;
     logoUrl: string; helpUrl: string; loginUrl: string; showLogin: boolean; showLocalLogin: boolean; ssoReady: boolean;
@@ -8,6 +10,17 @@ export const defaultPageConfig: HappyPageConfig = { schemaVersion: 1, revision: 
 export function validatePageConfig(raw: unknown): HappyPageConfig {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid display configuration');
     const o = raw as Record<string, unknown>; const c = { ...defaultPageConfig };
+    if (o.locale !== undefined) { if (!['en','zh-Hans','zh-Hant'].includes(String(o.locale))) throw new Error('Invalid display locale'); c.locale=o.locale as HappyPageConfig['locale']; }
+    if (o.localized !== undefined) {
+        if (!o.localized || typeof o.localized !== 'object' || Array.isArray(o.localized)) throw new Error('Invalid localized display text');
+        c.localized={};
+        for (const [language, fields] of Object.entries(o.localized)) {
+            if (!['en','zh-Hans','zh-Hant'].includes(language) || !fields || typeof fields !== 'object' || Array.isArray(fields)) throw new Error('Invalid display locale');
+            const safe: Record<string,string>={};
+            for (const [field,value] of Object.entries(fields)) { if (!['title','subtitle','loginLabel','footerText'].includes(field) || typeof value !== 'string' || value.length > 1000 || /[\x00\r]/.test(value)) throw new Error('Invalid localized display text'); safe[field]=value; }
+            c.localized[language as 'en'|'zh-Hans'|'zh-Hant']=safe;
+        }
+    }
     if (o.schemaVersion !== 1) throw new Error('Unsupported configuration schema');
     for (const k of ['revision', 'brandName', 'title', 'subtitle', 'loginLabel', 'footerText', 'logoUrl', 'helpUrl', 'loginUrl'] as const) {
         const v = o[k]; if (typeof v !== 'string' || v.length > (k.endsWith('Url') ? 2048 : 1000) || /[\x00\r]/.test(v)) throw new Error('Invalid display value'); c[k] = v;

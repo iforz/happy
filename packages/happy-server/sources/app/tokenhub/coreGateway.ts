@@ -3,7 +3,8 @@ import { isIP } from 'node:net';
 import { z } from 'zod';
 import { authcenterOrigin, type WorkClientContext } from './workAuthorization';
 
-export const coreInput = z.object({ model: z.string().trim().min(1).max(200), prompt: z.string().trim().min(1).max(4000), requestId: z.string().uuid().optional() }).strict();
+export const conversationMessages = z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1).max(16000) }).strict()).min(1).max(49).refine(messages => messages.length % 2 === 1 && messages.every((m, i) => m.role === (i % 2 ? 'assistant' : 'user') && m.content.trim()) && messages.reduce((n, m) => n + m.content.length, 0) <= 16000);
+export const coreInput = z.object({ model: z.string().trim().min(1).max(200).refine(model=>model!=='default'), prompt: z.string().trim().min(1).max(4000).optional(), messages: conversationMessages.optional(), requestId: z.string().uuid().optional() }).strict().refine(input => (input.prompt !== undefined) !== (input.messages !== undefined));
 export type CoreInput = z.infer<typeof coreInput>;
 export type CoreEvent = { type: 'delta'; text: string } | { type: 'usage'; requestId: string; coreRequestId?: string; model: string; inputTokens: number; outputTokens: number; mock: false; billable: true; accounting: 'core' }
     | { type: 'done' } | { type: 'error'; code: string; message: string };
@@ -97,7 +98,7 @@ export function createCoreGateway(dependencies: Dependencies = {}) {
                     ids.add(model.id);
                     return { id: model.id, name: model.id };
                 });
-                return { mode: 'real' as const, billable: true as const, models };
+                return { mode: 'real' as const, billable: true as const, models:models.filter(model=>model.id!=='default') };
             } finally { d.close(); }
         },
         async *stream(input: CoreInput, grant: string, context: WorkClientContext, signal: AbortSignal): AsyncGenerator<CoreEvent> {
@@ -107,7 +108,7 @@ export function createCoreGateway(dependencies: Dependencies = {}) {
                 const safe = coreInput.parse(input);
                 requestId = safe.requestId ?? requestId;
                 const response = await request('/api/v1/work/chat/completions', grant, context, d.controller.signal, {
-                    model: safe.model, messages: [{ role: 'user', content: safe.prompt }], stream: true, stream_options: { include_usage: true },
+                    model: safe.model, messages: safe.messages ?? [{ role: 'user', content: safe.prompt! }], stream: true, stream_options: { include_usage: true },
                 }, requestId);
                 const coreRequestId = response.headers.get('x-request-id');
                 const correlation = coreRequestId && /^[A-Za-z0-9_-]{1,128}$/.test(coreRequestId) ? coreRequestId : undefined;

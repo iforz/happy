@@ -10,7 +10,7 @@ import { zhHant } from './translations/zh-Hant';
 import { ja } from './translations/ja';
 import * as Localization from 'expo-localization';
 import { loadSettings } from '@/sync/persistence';
-import { type SupportedLanguage, SUPPORTED_LANGUAGES, SUPPORTED_LANGUAGE_CODES, DEFAULT_LANGUAGE } from './_all';
+import { type SupportedLanguage, resolveLanguageTag, SUPPORTED_LANGUAGES, SUPPORTED_LANGUAGE_CODES, DEFAULT_LANGUAGE } from './_all';
 
 /**
  * Extract all possible dot-notation keys from the nested translation object
@@ -105,41 +105,11 @@ if (settings.settings.preferredLanguage && settings.settings.preferredLanguage i
 
 // Read from device
 if (!found) {
-    let locales = Localization.getLocales();
-    console.log(`[i18n] Device locales:`, locales.map(l => l.languageCode));
-    for (let l of locales) {
-        if (l.languageCode) {
-            // Expo added special handling for Chinese variants using script code https://github.com/expo/expo/pull/34984
-            if (l.languageCode === 'zh') {
-                let chineseVariant: string | null = null;
-
-                // We only have translations for simplified Chinese right now, but looking for help with traditional Chinese.
-                if (l.languageScriptCode === 'Hans') {
-                    chineseVariant = 'zh-Hans';
-                } else if (l.languageScriptCode === 'Hant') {
-                    chineseVariant = 'zh-Hant';
-                }
-
-                console.log(`[i18n] Chinese script code: ${l.languageScriptCode} -> ${chineseVariant}`);
-
-                if (chineseVariant && chineseVariant in translations) {
-                    currentLanguage = chineseVariant as SupportedLanguage;
-                    console.log(`[i18n] Using Chinese variant: ${currentLanguage}`);
-                    break;
-                }
-
-                currentLanguage = 'zh-Hans';
-                console.log(`[i18n] Falling back to simplified Chinese: zh-Hans`);
-                break;
-            }
-
-            // Direct match for non-Chinese languages
-            if (l.languageCode in translations) {
-                currentLanguage = l.languageCode as SupportedLanguage;
-                console.log(`[i18n] Using device locale: ${currentLanguage}`);
-                break;
-            }
-        }
+    for (const locale of Localization.getLocales()) {
+        if (!locale.languageCode) continue;
+        const tag=locale.languageTag || [locale.languageCode,locale.languageScriptCode,locale.regionCode].filter(Boolean).join('-');
+        const resolved=resolveLanguageTag(tag);
+        if (resolved in translations) { currentLanguage=resolved; break; }
     }
 }
 

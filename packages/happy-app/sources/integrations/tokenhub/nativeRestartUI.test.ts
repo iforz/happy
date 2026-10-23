@@ -10,6 +10,7 @@ vi.mock('@/auth/AuthContext', () => ({ useAuth: () => ({ restartRequired: fixtur
 vi.mock('./usePageConfig', () => ({ usePageConfig: () => ({ config: { showLogin: true, ssoReady: true, showLocalLogin: true, loginLabel: '统一登录' }, offline: false }) }));
 vi.mock('./login', () => ({ beginTokenHubLogin: fixture.begin, saveTokenHubLogin: vi.fn() }));
 vi.mock('./logoutNotice', () => ({ readSessionNotice: async () => '本机已退出，远端撤销未确认。' }));
+vi.mock('@/text',()=>({getCurrentLanguage:()=> 'zh-Hans'}));
 import { TokenHubWelcome } from './TokenHubWelcome';
 let renderer: ReturnType<typeof create>;
 beforeEach(() => { fixture.restartRequired = false; fixture.cleanupRequired = false; fixture.logout.mockClear(); fixture.begin.mockClear(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); });
@@ -22,7 +23,7 @@ it('shows the manual restart requirement, preserves remote uncertainty, and remo
     await act(async () => { fixture.restartRequired = true; renderer.update(screen()); });
     expect(renderer.root.findAllByType('RoundButton')).toHaveLength(0);
     expect(renderer.root.findAllByType('Pressable')).toHaveLength(0);
-    expect(JSON.stringify(renderer.toJSON())).toContain('完全关闭并重新打开 App');
+    expect(JSON.stringify(renderer.toJSON())).toContain('完全关闭并重新打开应用');
     expect(JSON.stringify(renderer.toJSON())).toContain('远端撤销未确认');
     expect(fixture.begin).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled(); expect(makeIdentity).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { workText } from '@/integrations/tokenhub/workText';
 /**
  * Session operations for remote procedure calls
  * Provides strictly typed functions for all session-related RPC operations
@@ -266,6 +267,13 @@ export async function machineSpawnNewSession(options: SpawnSessionOptions): Prom
     const { machineId, directory, approvedNewDirectoryCreation = false, token, agent, permissionMode, modelMode, effortLevel, clientRequestId, providerId, modelId, effort, happyAgentTarget, resumeClaudeSessionId, resumeCodexThreadId, parentSessionId, forkedFromMessageId, isSideChat } = options;
 
     try {
+        if (agent !== 'rig') {
+            const metadata=storage.getState().machines[machineId]?.metadata as unknown as {models?: Array<{code?:string;id?:string}>} | undefined;
+            const known=metadata?.models;
+            if (!modelMode || modelMode==='default' || !Array.isArray(known) || !known.some(model=>(model.code ?? model.id)===modelMode)) {
+                throw new Error(workText('unavailable'));
+            }
+        }
         if (agent === 'rig' && !clientRequestId) {
             throw new Error('Rig session creation requires a client request ID');
         }

@@ -1,3 +1,7 @@
+import { useAuth } from '@/auth/AuthContext';
+import { isTokenHubSessionForUI } from '@/integrations/tokenhub/sessionSource';
+import { usePathname } from 'expo-router';
+import { workText } from '@/integrations/tokenhub/workText';
 import * as React from 'react';
 import { Text, View, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -104,6 +108,12 @@ export const SidebarView = React.memo(() => {
     const handleArchiveVisibility = React.useCallback(() => {
         setHideArchivedSessions(!hideArchivedSessions);
     }, [hideArchivedSessions, setHideArchivedSessions]);
+    const auth = useAuth(), pathname = usePathname();
+    if (auth.credentials && isTokenHubSessionForUI(auth.credentials.token) && pathname !== '/device-agents') {
+        return <View style={[styles.container,{paddingTop:safeArea.top+headerHeight,paddingHorizontal:16,gap:18}]}>
+            {[['title','/'],['agents','/device-agents'],['settings','/settings']].map(([key,url])=><Pressable key={url} accessibilityRole="button" onPress={()=>router.push(url as any)} style={{padding:12}}><Text style={styles.newSessionText}>{workText(key as 'title'|'agents'|'settings')}</Text></Pressable>)}
+        </View>;
+    }
     return (
         <View style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}>
             <View style={styles.topControls}>

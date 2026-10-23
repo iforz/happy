@@ -55,6 +55,7 @@ import {
 import type { Session } from '@/sync/storageTypes';
 import {
     getEffortLevelsForModel,
+    getAvailableModels,
     getHardcodedModelModes,
     getHardcodedPermissionModes,
     filterPermissionModesForCli,
@@ -959,12 +960,12 @@ export const HomeDock = React.memo(({
         [agentType, happyCliVersion, rigCreation],
     );
     const modelOptions = React.useMemo(
-        () => rigCreation?.models ?? includeConfiguredModel(
+        () => rigCreation?.models ?? getAvailableModels(
             agentType,
-            getHardcodedModelModes(agentType, t),
-            defaults.modelMode,
+            selectedChoice?.happyMachine?.metadata as unknown as Session['metadata'],
+            t,
         ),
-        [agentType, defaults.modelMode, rigCreation],
+        [agentType, selectedChoice, rigCreation],
     );
     // The code default last: when the saved and configured modes were both
     // filtered out for an old CLI, land there rather than on whichever mode

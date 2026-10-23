@@ -1,3 +1,6 @@
+import { getServerUrl } from '@/sync/serverConfig';
+import { accountScope, TokenHubConversation } from '@/integrations/tokenhub/TokenHubConversation';
+import { isTokenHubSessionForUI } from '@/integrations/tokenhub/sessionSource';
 import { TokenHubWelcome } from "@/integrations/tokenhub/TokenHubWelcome";
 import { useAuth } from "@/auth/AuthContext";
 import { Platform } from "react-native";
@@ -18,6 +21,7 @@ export default function Home() {
     if (!auth.isAuthenticated) {
         return <NotAuthenticated />;
     }
+    if (auth.credentials && isTokenHubSessionForUI(auth.credentials.token)) return <TokenHubConversation key={accountScope(getServerUrl(),auth.credentials.token)} />;
     return (
         <Authenticated />
     )

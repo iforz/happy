@@ -81,14 +81,6 @@ type MetadataOption = {
     description?: string | null;
 };
 
-const GEMINI_MODEL_FALLBACKS: ModelMode[] = [
-    { key: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', description: 'latest & most capable' },
-    { key: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'latest & fast' },
-    { key: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite', description: 'latest & fastest' },
-    { key: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'most capable' },
-    { key: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'fast & efficient' },
-    { key: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', description: 'fastest' },
-];
 
 export function mapMetadataOptions(options?: MetadataOption[] | null): ModeOption[] {
     if (!options || options.length === 0) {
@@ -154,88 +146,29 @@ export function getGeminiPermissionModes(translate: Translate): PermissionMode[]
     ];
 }
 
-// The current generation only. Older Claudes and the `default model` row are
-// deliberately absent: picking a model is the point of this menu, and every
-// entry here is a 5.
-//
-// Keys are full model IDs rather than the short aliases, because the aliases
-// do not all mean what the row says. `sonnet` still resolves to Sonnet 4.6 in
-// the CLI's alias table, and `opus-5` is not in that table at all (`claude
-// --model opus-5` errors on 2.1.199). Full IDs pass straight through to the
-// API, so they say exactly which model is meant.
-//
-// One row per model, with no `[1m]` twins. Every model here is 1M-native in
-// Claude Code's own model table (`context.native_1m`), so the plain ID already
-// gets the 1M window, and the suffix only adds the context-1m beta header —
-// which gateways, Bedrock, Vertex and Foundry can refuse. Saved `[1m]` keys are
-// mapped onto these rows by retireModelMode.
-//
-// Sonnet 5.5 and Haiku 5.5 are in that table from Claude Code 2.1.287 and
-// 2.1.293. happy-cli now requires Agent SDK 0.3.295 (2.1.295), but an older
-// install can still carry 0.3.283 (2.1.283), which runs them as unknown
-// models: at 200K, compacting early.
+// Models are supplied exclusively by verified runtime catalogs.
 export function getClaudeModelModes(): ModelMode[] {
-    return [
-        { key: 'claude-fable-5-1', name: 'Fable 5.1', description: '1M context', providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'claude-fable-5', name: 'Fable 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'claude-opus-5-5', name: 'Opus 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'claude-opus-5', name: 'Opus 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'claude-sonnet-5-5', name: 'Sonnet 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'claude-haiku-5-5', name: 'Haiku 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-    ];
+    return []; // A model must come from the current verified capability catalog.
 }
 
 // Display names for Claude models that left the list but can still be saved,
 // so their saved row reads like the rest instead of as a raw model ID.
-const UNLISTED_CLAUDE_MODEL_NAMES: Record<string, string> = {
-    'claude-sonnet-5': 'Sonnet 5',
-};
 
 export function getCodexModelModes(): ModelMode[] {
-    return [
-        { key: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'most capable', providerId: 'openai', providerName: 'OpenAI' },
-        { key: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', description: null, providerId: 'openai', providerName: 'OpenAI' },
-        { key: 'gpt-6-sol', name: 'GPT-6 Sol', description: null, providerId: 'openai', providerName: 'OpenAI' },
-        { key: 'gpt-6-luna', name: 'GPT-6 Luna', description: null, providerId: 'openai', providerName: 'OpenAI' },
-        { key: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: null, providerId: 'openai', providerName: 'OpenAI' },
-        { key: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: null, providerId: 'openai', providerName: 'OpenAI' },
-        { key: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: null, providerId: 'openai', providerName: 'OpenAI' },
-    ];
+    return []; // A model must come from the current verified capability catalog.
 }
 
-/**
- * Appends the saved model when the list does not offer it, so a pick that left
- * the catalog still shows as itself instead of the picker landing on whatever
- * leads the list. For Claude that is a model that was retired from the picker
- * but still runs (Sonnet 5); a saved `[1m]` key is first mapped onto its row.
- */
+/** Saved selections never introduce models absent from the current catalog. */
 export function includeConfiguredModel(
     flavor: AgentFlavor,
     models: ModelMode[],
     configuredModelKey: string | null | undefined,
 ): ModelMode[] {
-    const isClaude = flavor !== 'rig' && normalizeAgentKey(flavor) === 'claude';
-    const key = retireModelMode(flavor, configuredModelKey);
-    if (
-        (flavor !== 'codex' && flavor !== 'agy' && !isClaude)
-        || !key
-        || key === 'default'
-        || models.some((model) => model.key === key)
-    ) {
-        return models;
-    }
-    return [
-        ...models,
-        {
-            key,
-            name: (isClaude ? UNLISTED_CLAUDE_MODEL_NAMES[key] : undefined) ?? key,
-            description: flavor === 'codex' ? 'custom model' : 'saved model',
-        },
-    ];
+    return models.filter(model => model.key !== 'default' && !model.disabled && !model.unavailable);
 }
 
 export function getGeminiModelModes(): ModelMode[] {
-    return GEMINI_MODEL_FALLBACKS;
+    return []; // A model must come from the current verified capability catalog.
 }
 
 // runOpenClaw never reads permissionMode, so neither of these changes what
@@ -349,37 +282,18 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
 }
 
 export function getOpenClawModelModes(): ModelMode[] {
-    return [
-        { key: 'default', name: 'Default model', description: null },
-    ];
+    return []; // A model must come from the current verified capability catalog.
 }
 
 // Gemini effort is deliberately not encoded into separate model rows. Happy's
 // existing effort picker carries `low`/`medium`/`high` independently, and happy-cli
 // resolves the pair to the exact display name `agy --model` accepts.
 export function getAgyModelModes(): ModelMode[] {
-    return [
-        { key: 'Gemini 3.8 Flash', name: 'Gemini 3.8 Flash', description: null, providerId: 'google', providerName: 'Google' },
-        { key: 'Claude Sonnet 4.6 (Thinking)', name: 'Claude Sonnet 4.6 (Thinking)', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'Claude Opus 4.6 (Thinking)', name: 'Claude Opus 4.6 (Thinking)', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
-        { key: 'GPT-OSS 120B (Medium)', name: 'GPT-OSS 120B (Medium)', description: null, providerId: 'openai', providerName: 'OpenAI' },
-    ];
+    return []; // A model must come from the current verified capability catalog.
 }
 
 export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translate): ModelMode[] {
-    if (flavor === 'codex') {
-        return getCodexModelModes();
-    }
-    if (flavor === 'gemini') {
-        return getGeminiModelModes();
-    }
-    if (flavor === 'openclaw') {
-        return getOpenClawModelModes();
-    }
-    if (flavor === 'agy') {
-        return getAgyModelModes();
-    }
-    return getClaudeModelModes();
+    return []; // A model must come from the current verified capability catalog.
 }
 
 export function getAvailableModels(
@@ -388,67 +302,16 @@ export function getAvailableModels(
     translate: Translate,
     selectedKey?: string | null,
 ): ModelMode[] {
+    // Persisted preferences and current-model metadata are selections, never catalogs.
     if (isRigMetadataV1(metadata)) {
-        const models: ModelMode[] = sortRigModelsForPicker(getRigModels(metadata)).map((model) => ({
-            key: model.key,
-            name: model.name,
-            description: model.providerName,
-            modelId: model.id,
-            providerId: model.providerId,
-            providerName: model.providerName,
-            providerKind: model.providerKind,
-            contextWindow: model.contextWindow,
-            serviceTiers: model.serviceTiers,
-            thinkingLevels: model.thinkingLevels,
-            defaultThinkingLevel: model.defaultThinkingLevel,
+        return sortRigModelsForPicker(getRigModels(metadata)).filter(model => model.key !== 'default').map(model => ({
+            key:model.key,name:model.name,description:model.providerName,modelId:model.id,
+            providerId:model.providerId,providerName:model.providerName,providerKind:model.providerKind,
+            contextWindow:model.contextWindow,serviceTiers:model.serviceTiers,
+            thinkingLevels:model.thinkingLevels,defaultThinkingLevel:model.defaultThinkingLevel,
         }));
-        const current = getRigCurrentModel(metadata);
-        if (current?.unavailable && !models.some((model) => model.key === current.key)) {
-            models.push({
-                key: current.key,
-                name: current.name,
-                description: `${current.providerName} · unavailable`,
-                modelId: current.id,
-                providerId: current.providerId,
-                providerName: current.providerName,
-                providerKind: current.providerKind,
-                thinkingLevels: [],
-                serviceTiers: [],
-                unavailable: true,
-                disabled: true,
-            });
-        }
-        const locallySelectedKey = selectedKey ?? metadata?.modelMode;
-        if (locallySelectedKey && locallySelectedKey.includes(':') && !models.some((model) => model.key === locallySelectedKey)) {
-            const separator = locallySelectedKey.indexOf(':');
-            const providerId = locallySelectedKey.slice(0, separator);
-            const modelId = locallySelectedKey.slice(separator + 1);
-            models.push({
-                key: locallySelectedKey,
-                name: modelId,
-                description: `${providerId} · unavailable`,
-                modelId,
-                providerId,
-                providerName: providerId,
-                providerKind: 'custom',
-                unavailable: true,
-                disabled: true,
-            });
-        }
-        return models;
     }
-    const metadataModels = mapMetadataOptions(metadata?.models);
-    if (metadataModels.length > 0) {
-        if (flavor === 'codex' && !metadataModels.some((model) => model.key === 'default')) {
-            return [{ key: 'default', name: 'default model', description: null }, ...metadataModels];
-        }
-        return metadataModels;
-    }
-    return includeConfiguredModel(
-        flavor,
-        getHardcodedModelModes(flavor, translate),
-        selectedKey,
-    );
+    return mapMetadataOptions(metadata?.models).filter(model => model.key && model.key !== 'default');
 }
 
 export function getAvailablePermissionModes(
@@ -517,7 +380,7 @@ export function resolveCurrentOption<T extends ModeOption>(
 }
 
 export function getDefaultModelKey(flavor: AgentFlavor, cliVersion?: string | null): string {
-    return getCodeAgentDefaults(flavor, cliVersion).modelMode;
+    return ''; // No synthetic model default or unknown-agent fallback.
 }
 
 export function getDefaultPermissionModeKey(flavor: AgentFlavor): string {

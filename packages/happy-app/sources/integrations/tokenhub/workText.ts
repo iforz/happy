@@ -1,0 +1,51 @@
+import { getCurrentLanguage } from '@/text';
+
+const en = {
+    title: 'TokenHub Chat', models: 'Model', loading: 'Loading available models…', reload: 'Reload models',
+    empty: 'No models are available for this account.', send: 'Send', cancel: 'Stop', newChat: 'New conversation',
+    placeholder: 'Message the selected model', agents: 'Device agents', agentsDescription: 'Connected devices and agent defaults',
+    settings: 'Settings', ready: 'Ready', streaming: 'Receiving response…', complete: 'Complete', cancelled: 'Stopped — partial response kept',
+    failed: 'Request failed — partial response kept', user: 'You', assistant: 'Assistant', history: 'Conversations',
+    catalogError: 'Could not load authorized models. Sending is disabled; reload to retry.',
+    unavailable: 'This model is no longer available. Select an available model.',
+    requestError: 'The request did not complete. Check usage records before sending again.',
+    authentication: 'Your authorization has expired. Sign in again.', forbidden: 'This account cannot access this model or has insufficient quota.',
+    quota: 'Insufficient quota. No automatic retry was made.', rateLimit: 'Too many requests. Try again later.',
+    contextLimit: 'This conversation has reached the context limit. Start a new conversation; previous messages are retained.',
+    reconciliation: 'Usage reconciliation is pending. Check TokenHub records before making another request.',
+    savedError: 'Local conversation storage is unavailable. Keep this page open to retain the conversation.',
+    inputTokens: 'Input tokens', outputTokens: 'Output tokens', records: 'Usage is recorded by TokenHub.',
+    cloudDescription: 'Models and access come from your TokenHub account. Device agents remain available separately.',
+    signIn: 'Sign in with TokenHub', restore: 'Use an existing identity or device', createIdentity: 'Create a local encrypted identity',
+    offline: 'Connection unavailable. Device sign-in is still available.', help: 'Help', loginError: 'Sign-in is temporarily unavailable.',
+    restart: 'Authorization was cleared. Fully close and reopen the app to continue.',
+    cleanup: 'This session is disabled, but local credentials have not been cleared. Unlock your device and retry.',
+    retryCleanup: 'Retry local sign-out cleanup', cleanupError: 'Local cleanup failed. Unlock your device and retry.',
+    nativeSession: 'Sign in again when the session expires. Signing out revokes the current TokenHub session; your encrypted device identity is retained.',
+};
+const zh: Record<keyof typeof en, string> = {
+    title: 'TokenHub 聊天', models: '模型', loading: '正在读取可用模型…', reload: '重新加载模型',
+    empty: '此账号当前没有可用模型。', send: '发送', cancel: '停止', newChat: '新建对话',
+    placeholder: '向所选模型发送消息', agents: '设备代理', agentsDescription: '已连接的设备与代理默认设置',
+    settings: '设置', ready: '就绪', streaming: '正在接收回复…', complete: '已完成', cancelled: '已停止，部分回复已保留',
+    failed: '请求失败，部分回复已保留', user: '你', assistant: '助手', history: '对话记录',
+    catalogError: '无法读取授权模型，已禁止发送。请重新加载后重试。',
+    unavailable: '此模型已不可用，请选择当前可用模型。',
+    requestError: '请求未完成。再次发送前请先核对用量记录。',
+    authentication: '授权已过期，请重新登录。', forbidden: '此账号没有模型访问权限或可用配额。',
+    quota: '可用配额不足，未自动重试。', rateLimit: '请求过于频繁，请稍后重试。',
+    contextLimit: '此对话已达到上下文上限，请新建对话；原消息会保留。',
+    reconciliation: '用量尚待核对，请先检查 TokenHub 记录，再发起新请求。',
+    savedError: '本地对话存储暂不可用，请保持页面打开以保留当前对话。',
+    inputTokens: '输入令牌', outputTokens: '输出令牌', records: '用量由 TokenHub 统一记录。',
+    cloudDescription: '模型与权限来自你的 TokenHub 账号。设备代理可单独打开。',
+    signIn: '使用 TokenHub 登录', restore: '使用已有身份或设备登录', createIdentity: '创建本地加密身份',
+    offline: '连接暂不可用，仍可使用设备登录。', help: '帮助', loginError: '登录暂不可用。',
+    restart: '本机授权已清除，请完全关闭并重新打开应用后继续。',
+    cleanup: '此会话已停用，但本机凭据尚未清除。请解锁设备后重试。',
+    retryCleanup: '重试本机退出清理', cleanupError: '本机清理尚未成功，请解锁设备后重试。',
+    nativeSession: '会话到期后需重新登录。退出时会撤销当前 TokenHub 会话，原有加密设备身份会保留。',
+};
+export type WorkTextKey = keyof typeof en;
+export function workTextFor(language: string, key: WorkTextKey): string { return language.startsWith('zh') ? zh[key] : en[key]; }
+export function workText(key: WorkTextKey): string { return workTextFor(getCurrentLanguage(), key); }

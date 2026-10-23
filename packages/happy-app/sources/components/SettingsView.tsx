@@ -1,3 +1,4 @@
+import { workText } from '@/integrations/tokenhub/workText';
 import { HappyEngineeringWordmark } from './onboarding/HappyEngineeringWordmark';
 import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import { NativeScrollEvent, NativeSyntheticEvent, View, ScrollView, Pressable, Platform } from 'react-native';
@@ -337,8 +338,8 @@ export const SettingsView = React.memo(function SettingsView({
                     onPress={() => router.push('/settings/voice')}
                 />
                 <Item
-                    title="Agents"
-                    subtitle="Connected machines and agent defaults"
+                    title={workText('agents')}
+                    subtitle={workText('agentsDescription')}
                     icon={<Ionicons name="options-outline" size={29} color="#5AC8FA" />}
                     onPress={() => router.push('/settings/agents' as any)}
                 />

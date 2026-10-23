@@ -397,13 +397,13 @@ export const zhHans: TranslationStructure = {
         viewMachineSubtitle: '查看设备详情和会话',
         viewChanges: '查看更改',
         viewChangesSubtitle: '所有未提交文件的差异',
-        resumeSession: 'Resume Session',
-        resumeSessionSubtitle: 'Resume this session on the same machine',
-        resumeSessionSameMachineOnly: 'This session can only be resumed on the same machine it started on.',
-        resumeSessionMachineOffline: 'This machine is offline. Resume is only available while it is online.',
-        resumeSessionMissingMachine: 'This session is missing its machine metadata, so it cannot be resumed.',
-        resumeSessionMissingBackendId: 'This session does not have a resumable Claude or Codex identifier.',
-        resumeSessionUnexpectedDirectoryPrompt: 'Resume cannot create directories. Start the session manually from its original path.',
+        resumeSession: '恢复会话',
+        resumeSessionSubtitle: '在原设备上恢复此会话',
+        resumeSessionSameMachineOnly: '此会话只能在最初启动它的设备上恢复。',
+        resumeSessionMachineOffline: '设备已离线，请在设备上线后恢复。',
+        resumeSessionMissingMachine: '此会话缺少设备信息，无法恢复。',
+        resumeSessionMissingBackendId: '此会话缺少可恢复的 Claude 或 Codex 标识。',
+        resumeSessionUnexpectedDirectoryPrompt: '恢复会话不会创建目录，请从原路径手动启动。',
         killSessionSubtitle: '立即终止会话',
         archiveSessionSubtitle: '归档此会话并停止它',
         metadata: '元数据',
@@ -439,7 +439,11 @@ export const zhHans: TranslationStructure = {
 
     components: {
         emptyMainScreen: {
-            ...en.components.emptyMainScreen,
+            connectComputer: '连接你的电脑',
+            desktopSetupInstructions: '从配置的下载页面安装 Work 桌面端。设置时选择“我已打开应用”，然后扫描这里的设备连接二维码。',
+            harnessDescription: '使用 Claude Code、Codex 或 Work 代理。电脑与手机可保持同一账号连接。',
+            getDesktop: '获取 Work 桌面端',
+            terminalAlternative: '更喜欢终端？配置 Work CLI',
             // Used by EmptyMainScreen component
             readyToCode: '准备开始编程？',
             installCli: '安装 Work CLI',

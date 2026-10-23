@@ -102,3 +102,11 @@ export const SUPPORTED_LANGUAGE_CODES: SupportedLanguage[] = Object.keys(SUPPORT
  * Default language code
  */
 export const DEFAULT_LANGUAGE: SupportedLanguage = 'en';
+
+/** Shared locale resolution for initialization and the automatic-language label. */
+export function resolveLanguageTag(tag: string): SupportedLanguage {
+ const parts = tag.replace(/_/g, '-').split('-')
+ const base = parts[0].toLowerCase()
+ if (base === 'zh') return parts.some(p => ['hant','tw','hk','mo'].includes(p.toLowerCase())) ? 'zh-Hant' : 'zh-Hans'
+ return SUPPORTED_LANGUAGE_CODES.includes(base as SupportedLanguage) ? base as SupportedLanguage : DEFAULT_LANGUAGE
+}

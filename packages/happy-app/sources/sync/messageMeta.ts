@@ -1,9 +1,10 @@
+import { workText } from '@/integrations/tokenhub/workText';
 import type { Session } from './storageTypes';
 import type { Settings } from './settings';
 import type { MessageMeta } from './typesMessageMeta';
 import { resolveSessionState } from './sessionState';
 import { getAgentDefaultOverride, resolveAgentDefaultConfig, retirePermissionMode } from './agentDefaults';
-import { permissionModeSupportedByCli } from '@/components/modelModeOptions';
+import { getAvailableModels, permissionModeSupportedByCli } from '@/components/modelModeOptions';
 import type { PermissionModeKey } from '@/components/PermissionModeSelector';
 import {
     getRigComposerMode,
@@ -70,10 +71,17 @@ export class UnsupportedPermissionModeError extends Error {
     }
 }
 
+export class UnsupportedModelModeError extends UnsupportedPermissionModeError {
+    constructor(model: string) { super(model, 'unknown'); this.name='UnsupportedModelModeError'; this.message=workText('unavailable'); }
+}
+
 export function resolveMessageModeMeta(
     session: Pick<Session, 'permissionMode' | 'modelMode' | 'metadata' | 'effortLevel' | 'serviceTier'>,
     settings?: Pick<Settings, 'agentDefaultOverrides'>,
 ): MessageModeMeta {
+    const availableModels=getAvailableModels(session.metadata?.flavor,session.metadata,()=>'',session.modelMode);
+    const desired=session.modelMode ?? (isRigMetadataV1(session.metadata) ? getRigSelectedModelKey(session.metadata) : session.metadata?.currentModelCode);
+    if (!desired || !availableModels.some(model=>model.key===desired)) throw new UnsupportedModelModeError(desired || '');
     if (isRigMetadataV1(session.metadata)) {
         // The local mirror is the composer (draft, then lastMode); the
         // deprecated display fields are only the final fallback.
@@ -94,10 +102,6 @@ export function resolveMessageModeMeta(
         if (selectedModel) {
             meta.model = selectedModel.id;
             meta.modelProviderId = selectedModel.providerId;
-        } else if (selectedKey?.includes(':')) {
-            const separator = selectedKey.indexOf(':');
-            meta.modelProviderId = selectedKey.slice(0, separator);
-            meta.model = selectedKey.slice(separator + 1);
         }
 
         const levels = getRigReasoningLevels(session.metadata, selectedKey);
@@ -134,7 +138,7 @@ export function resolveMessageModeMeta(
         const defaults = resolveAgentDefaultConfig(settings?.agentDefaultOverrides, flavor, cliVersion);
         meta.permissionMode = supported(retirePermissionMode(session.permissionMode ?? defaults.permissionMode));
 
-        const modelMode = session.modelMode ?? defaults.modelMode;
+        const modelMode = desired;
         meta.model = modelMode === 'default' ? null : modelMode;
 
         meta.effort = session.effortLevel ?? defaults.effortLevel;
@@ -149,7 +153,7 @@ export function resolveMessageModeMeta(
         meta.permissionMode = supported(agentOverrides.permissionMode);
     }
 
-    const modelMode = session.modelMode ?? agentOverrides.modelMode;
+    const modelMode = desired;
     if (modelMode !== undefined) {
         meta.model = modelMode === 'default' ? null : modelMode;
     }

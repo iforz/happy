@@ -1,3 +1,4 @@
+import { getCurrentLanguage } from '@/text';
 import * as React from 'react';
 import { Platform } from 'react-native';
 import { getServerUrl } from '@/sync/serverConfig';
@@ -24,5 +25,8 @@ export function usePageConfig() {
         void refresh(); const focus = () => { void refresh(); }; window.addEventListener('focus', focus);
         return () => { disposed = true; active?.abort(); window.removeEventListener('focus', focus); };
     }, [key]);
-    return { config, offline };
+    const language=getCurrentLanguage();
+    const localized=config.localized?.[language as 'en'|'zh-Hans'|'zh-Hant'];
+    // Legacy custom text stays literal. Only explicit localized fields override it.
+    return { config: localized ? {...config,...localized} : config, offline };
 }
