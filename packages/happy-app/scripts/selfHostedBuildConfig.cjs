@@ -18,7 +18,7 @@ function validateWorkOrigin(value, target) {
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     const localWeb = target === 'web' && url.protocol === 'http:' && loopback;
     if ((url.protocol !== 'https:' && !localWeb) || url.username || url.password
-        || url.pathname !== '/' || url.search || url.hash) {
+        || !(url.pathname === '/' || (target === 'web' && ['/work', '/work/'].includes(url.pathname))) || url.search || url.hash) {
         throw new Error('EXPO_PUBLIC_HAPPY_SERVER_URL must be a Work HTTPS origin without credentials, path, query or fragment (HTTP loopback is allowed only for web).');
     }
 }

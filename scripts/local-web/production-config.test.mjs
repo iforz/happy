@@ -52,3 +52,15 @@ test('all explicitly registered app stack screens have actual route files', () =
  assert.equal(productionWebEnvironment(root,{HAPPY_PRODUCTION_ORIGIN:'https://work.iforz.cn'}).EXPO_PUBLIC_HAPPY_SERVER_URL,'https://work.iforz.cn');
  for(const raw of ['http://work.iforz.cn','https://work.iforz.cn/','https://work.iforz.cn/path','https://user@work.iforz.cn','https://work.iforz.cn?x=1','https://work.iforz.cn#x','https://127.0.0.1','https://localhost','https://work.localhost',' https://work.iforz.cn']) assert.throws(()=>productionOrigin(raw));
  });
+
+ test('Work subpath is explicit, fixed, and shared by Expo router and the relay', () => {
+ const env=productionWebEnvironment(root,{HAPPY_PRODUCTION_ORIGIN:'https://token.mzyai.com',HAPPY_PRODUCTION_BASE_PATH:'/work'});
+ assert.equal(env.EXPO_PUBLIC_HAPPY_SERVER_URL,'https://token.mzyai.com/work');
+ assert.equal(env.EXPO_PUBLIC_WORK_BASE_PATH,'/work');
+ for(const p of ['/work/','/api','//evil.test','/work/../api']) assert.throws(()=>productionWebEnvironment(root,{HAPPY_PRODUCTION_BASE_PATH:p}));
+ });
+
+ test('Expo exports its router and assets with the Work base path',()=>{
+ const config=JSON.parse(execFileSync(process.execPath,[path.join(root,'node_modules/expo/bin/cli'),'config','--type','public','--json'],{cwd:path.join(root,'packages/happy-app'),env:productionWebEnvironment(root,{HAPPY_PRODUCTION_ORIGIN:'https://token.mzyai.com',HAPPY_PRODUCTION_BASE_PATH:'/work'}),encoding:'utf8'}));
+ assert.equal(config.experiments.baseUrl,'/work');
+ });

@@ -215,7 +215,8 @@ export default {
             }
         },
         experiments: {
-            typedRoutes: true
+            typedRoutes: true,
+            baseUrl: process.env.EXPO_PUBLIC_WORK_BASE_PATH || undefined
         },
         extra: {
             router: {
