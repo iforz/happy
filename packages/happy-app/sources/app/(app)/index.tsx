@@ -14,9 +14,16 @@ import { OnboardingLinkComputer } from "@/components/onboarding/LinkComputer";
 import { shouldShowFirstRunInstall } from "@/components/onboarding/firstRunOnboarding";
 import { useAllMachines, useIsDataReady } from "@/sync/storage";
 import { isRunningOnMac } from '@/utils/platform';
+import { usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { PlatformWelcome } from '@/integrations/tokenhub/PlatformWelcome';
+import { PlatformHomeConversation } from '@/integrations/tokenhub/TokenHubConversation';
 
 export default function Home() {
     const auth = useAuth();
+    const platform = usePlatformSession();
+    if (platform.status !== 'disabled') {
+        return platform.status === 'ready' && platform.session ? <PlatformHomeConversation session={platform.session} /> : <PlatformWelcome />;
+    }
     if (!auth.isAuthenticated) {
         return <NotAuthenticated />;
     }

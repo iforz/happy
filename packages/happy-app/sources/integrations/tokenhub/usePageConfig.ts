@@ -8,6 +8,7 @@ export function usePageConfig() {
     const key = 'happy-display:v1:' + getServerUrl();
     const [config, setConfig] = React.useState<HappyPageConfig>(() => { if (Platform.OS !== 'web') return defaultPageConfig; try { return readCachedConfig(localStorage, key) ?? defaultPageConfig; } catch { return defaultPageConfig; } });
     const [offline, setOffline] = React.useState(false);
+    const [revision, reload] = React.useReducer(value => value + 1, 0);
     React.useEffect(() => {
         if (Platform.OS !== 'web') return;
         let disposed = false; let active: AbortController | undefined;
@@ -24,9 +25,9 @@ export function usePageConfig() {
         };
         void refresh(); const focus = () => { void refresh(); }; window.addEventListener('focus', focus);
         return () => { disposed = true; active?.abort(); window.removeEventListener('focus', focus); };
-    }, [key]);
+    }, [key, revision]);
     const language=getCurrentLanguage();
     const localized=config.localized?.[language as 'en'|'zh-Hans'|'zh-Hant'];
     // Legacy custom text stays literal. Only explicit localized fields override it.
-    return { config: localized ? {...config,...localized} : config, offline };
+    return { config: localized ? {...config,...localized} : config, offline, reload };
 }

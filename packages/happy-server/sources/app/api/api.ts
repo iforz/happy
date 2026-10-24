@@ -5,6 +5,7 @@ import { onShutdown } from "@/utils/shutdown";
 import { Fastify } from "./types";
 import { tokenHubRoutes } from "./routes/tokenHubRoutes";
 import { tokenHubLogoutRoutes } from "./routes/tokenHubLogoutRoutes";
+import { tokenHubPlatformRoutes } from './routes/tokenHubPlatformRoutes';
 import { tokenHubWorkRoutes } from "./routes/tokenHubWorkRoutes";
 import { authRoutes } from "./routes/authRoutes";
 import { pushRoutes } from "./routes/pushRoutes";
@@ -107,6 +108,7 @@ export async function startApi(opts: StartApiOptions = {}) {
     // Routes
     authRoutes(typed, authorization);
     tokenHubRoutes(typed, { authorization });
+    tokenHubPlatformRoutes(typed);
     tokenHubLogoutRoutes(typed, { authorization });
     tokenHubWorkRoutes(typed, { authorization });
     pushRoutes(typed);

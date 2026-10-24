@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'packages/happy-app/**'
+      - 'packages/happy-server/**'
       - 'packages/happy-wire/**'
       - 'scripts/**'
       - 'patches/**'
@@ -45,22 +46,16 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - name: Install frozen workspace dependencies and existing patches
         run: pnpm install --frozen-lockfile
-      - name: Verify the focused Work integration contracts
-        run: |
-          pnpm --filter happy-app exec vitest run --config vitest.tokenhub.config.ts \
-            sources/integrations/tokenhub/TokenHubConversation.test.ts \
-            sources/integrations/tokenhub/conversation.test.ts \
-            sources/integrations/tokenhub/newSessionRoute.test.ts \
-            sources/integrations/tokenhub/newSessionLifecycle.test.ts \
-            sources/integrations/tokenhub/workMockClient.test.ts \
-            sources/integrations/tokenhub/workText.test.ts \
-            sources/integrations/tokenhub/sessionSource.test.ts
+      - name: Verify all Work integration contracts, including independent platform auth
+        run: pnpm --filter happy-app exec vitest run --config vitest.tokenhub.config.ts
       - name: Verify the existing local/production build configuration
         run: pnpm test:web-local
       - name: Export the self-hosted production web app without publishing
         # This existing script scrubs ambient keys, disables analytics/OTA,
         # and runs local Expo export. It is not a self-hosted runner or deploy.
         # No origin/base-path override: use reviewed repository defaults.
+        env:
+          HAPPY_PRODUCTION_PLATFORM_AUTH: '1'
         run: pnpm web:build:selfhost
       - name: Verify output and record exact source provenance
         env:
@@ -83,7 +78,7 @@ jobs:
             run_id: process.env.GITHUB_RUN_ID,
             run_attempt: process.env.GITHUB_RUN_ATTEMPT,
             build_script: 'pnpm web:build:selfhost',
-            deployment_configuration: 'repository production-config.mjs defaults, not a verified live target',
+            deployment_configuration: 'platform-auth review build with repository origin defaults, not a verified live target',
             release_ready: false,
           }, null, 2) + '\n');
           JS

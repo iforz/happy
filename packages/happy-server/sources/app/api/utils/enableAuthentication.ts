@@ -35,6 +35,13 @@ export function enableAuthentication(app: Fastify, authorization: WorkAuthorizat
             'POST /v1/tokenhub/start', 'POST /v1/tokenhub/complete', 'POST /v1/version',
             'POST /v1/tokenhub/native/start', 'POST /v1/tokenhub/native/complete', 'POST /v1/tokenhub/native/handoff',
             'POST /v1/tokenhub/logout',
+            // Seedless platform BFF owns its own cookie/CSRF/live-Core validators.
+            // Do not extend this into a prefix exemption or legacy data access.
+            'POST /v1/tokenhub/platform/start', 'POST /v1/tokenhub/platform/complete',
+            'GET /v1/tokenhub/platform/session', 'HEAD /v1/tokenhub/platform/session',
+            'POST /v1/tokenhub/platform/logout',
+            'GET /v1/tokenhub/platform/models', 'HEAD /v1/tokenhub/platform/models',
+            'POST /v1/tokenhub/platform/stream',
         ]);
         const unsupported = new Set([
             '/v1/connect/github/params', '/v1/connect/github/callback', '/v1/connect/github/webhook',
