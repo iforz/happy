@@ -11,7 +11,7 @@ import { trustedJson, trustedTokenHubOrigin, unwrap } from '@/app/tokenhub/trust
 import { WORK_REVALIDATE_MS } from '@/app/tokenhub/workAuthorization';
 import {
     createPlatformAuthority, equalOpaque, platformCookie, PlatformAuthorityError, PlatformCapacityError, PlatformSessionStore,
-    PLATFORM_CSRF_HEADER, PLATFORM_FLOW_COOKIE, PLATFORM_SESSION_COOKIE, publicPlatformSession, readPlatformCookie,
+    PLATFORM_CSRF_HEADER, PLATFORM_SESSION_COOKIE, publicPlatformSession, readPlatformCookie,
     type PlatformFlow, type PlatformPrincipal, type PlatformRecord,
 } from '@/app/tokenhub/platformSession';
 
@@ -83,9 +83,9 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         } catch (error) {
             const status = error instanceof PlatformAuthorityError ? error.status : 503;
             if (status === 401) {
-                store.remove(session.id);
+                store.remove(session.id, session.record);
                 // A late read from an old tab must not clear a newer login's cookie.
-                // The invalid opaque ID is unusable server-side; explicit logout clears it.
+                // Only its captured principal is revoked, never a newer channel login.
             }
             fail(reply, status);
         }
@@ -98,50 +98,53 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
     app.addHook('onClose', async () => store.clear());
     app.post('/v1/tokenhub/platform/start', { bodyLimit: 1024, schema: { body: empty } }, async (request, reply) => {
         if (!available(reply) || !sameOrigin(request, reply, true)) return;
+        let pending: ReturnType<PlatformSessionStore['start']> | undefined;
         try {
+            // Allocate the generation before awaits so a slower old start cannot
+            // supersede a newer start for the same browser channel.
+            pending = store.start(readPlatformCookie(request.headers.cookie, PLATFORM_SESSION_COOKIE));
             const [page] = await Promise.all([config(transport, true), metadataForLogin()]);
-            if (!page.showLogin || !page.ssoReady) return fail(reply, 503, 'Platform login is unavailable');
+            if (!page.showLogin || !page.ssoReady) throw new Error('Platform login is unavailable');
             const url = new URL(page.loginUrl);
             if (url.origin !== authority || url.pathname !== '/happy/authorize' || url.search || url.hash || url.username || url.password) throw new Error('Invalid login target');
-            store.cancelFlow(readPlatformCookie(request.headers.cookie, PLATFORM_FLOW_COOKIE));
-            const flow = store.start();
+            const { flow } = pending;
+            if (!store.isCurrentFlow(flow)) throw new Error('Platform login was superseded');
             url.search = new URLSearchParams({ client_id: 'happy-web', redirect_uri: self + '/tokenhub/callback', state: flow.state, nonce: flow.nonce,
                 code_challenge: createHash('sha256').update(flow.verifier).digest('base64url'), code_challenge_method: 'S256' }).toString();
-            reply.header('Set-Cookie', platformCookie(PLATFORM_FLOW_COOKIE, flow.binding, (flow.expiresAt - now()) / 1000));
+            // Only a fresh anonymous channel writes a cookie. Completion and logout
+            // never do, so a delayed successful callback cannot switch accounts.
+            if (pending.created) reply.header('Set-Cookie', platformCookie(PLATFORM_SESSION_COOKIE, pending.id, (pending.expiresAt - now()) / 1000));
             return { authorizeUrl: url.toString(), state: flow.state, tokenHubOrigin: authority };
-        } catch { return fail(reply, 503, 'Platform login is unavailable'); }
+        } catch {
+            if (pending) store.cancelFlow(pending.id, pending.flow);
+            return fail(reply, 503, 'Platform login is unavailable');
+        }
     });
     app.post('/v1/tokenhub/platform/complete', { bodyLimit: 8192, schema: { body: callback } }, async (request, reply) => {
         if (!available(reply) || !sameOrigin(request, reply, true)) return;
-        let consumed = false;
         let activeFlow: PlatformFlow | undefined;
         try {
-            const flow = store.consume(request.body.state, readPlatformCookie(request.headers.cookie, PLATFORM_FLOW_COOKIE));
+            const flow = store.consume(request.body.state, readPlatformCookie(request.headers.cookie, PLATFORM_SESSION_COOKIE));
             activeFlow = flow;
-            consumed = true;
-            if (request.body.error) {
-                reply.header('Set-Cookie', platformCookie(PLATFORM_FLOW_COOKIE, '', 0));
-                return fail(reply, 400, 'Platform login cancelled');
-            }
+            if (request.body.error) return fail(reply, 400, 'Platform login cancelled');
             const [metadata, jwks] = await Promise.all([metadataForLogin(), trustedJson(authority, '/api/v1/auth/sso/jwks', {}, transport)]);
+            if (!store.isCurrentFlow(flow)) throw new Error('Platform login was cancelled');
             const result = unwrap(await trustedJson(authority, '/api/v1/auth/happy/exchange', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code: request.body.code, code_verifier: flow.verifier, client_id: 'happy-web', redirect_uri: self + '/tokenhub/callback' }),
             }, transport));
+            if (!store.isCurrentFlow(flow)) throw new Error('Platform login was cancelled');
             if (typeof result.id_token !== 'string' || typeof result.authorization_token !== 'string') throw new Error('Invalid login response');
             const identity = verifyIdentity(result.id_token, jwks, metadata.issuer, flow.nonce, now(), 'happy-web');
             const principal = await verifier!.verify(result.authorization_token, authority, identity.subject, context(request));
-            if (!store.isCurrentFlow(flow)) throw new Error('Platform login was cancelled');
-            const created = store.create(principal, result.authorization_token);
-            store.remove(readPlatformCookie(request.headers.cookie, PLATFORM_SESSION_COOKIE));
-            reply.header('Set-Cookie', [platformCookie(PLATFORM_FLOW_COOKIE, '', 0), platformCookie(PLATFORM_SESSION_COOKIE, created.id, (created.record.principal.expiresAt - now()) / 1000)]);
-            return publicPlatformSession(created.record);
+            const record = store.complete(flow, principal, result.authorization_token);
+            return publicPlatformSession(record);
         } catch (error) {
-            // An unmatched callback must not consume/clear the newer browser-bound flow.
-            if (!consumed) return fail(reply, 400, 'Invalid or expired platform login');
-            if (activeFlow && store.isCurrentFlow(activeFlow)) reply.header('Set-Cookie', platformCookie(PLATFORM_FLOW_COOKIE, '', 0));
+            // No callback writes cookies, even errors, and only its own generation
+            // can be cancelled. Stale responses cannot disturb a newer login.
+            if (!activeFlow) return fail(reply, 400, 'Invalid or expired platform login');
             return fail(reply, error instanceof PlatformAuthorityError ? error.status : error instanceof PlatformCapacityError ? 503 : 400, 'Platform login could not be verified');
-        } finally { if (activeFlow) store.cancelFlow(activeFlow.binding); }
+        } finally { if (activeFlow) store.cancelFlow(activeFlow.binding, activeFlow); }
     });
     app.get('/v1/tokenhub/platform/session', async (request, reply) => {
         if (!available(reply) || !sameOrigin(request, reply, false)) return;
@@ -154,10 +157,10 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         if (!session) return;
         // Local Work sign-out only. Core revocation would terminate the originating
         // refresh family, affecting other applications and requiring separate intent.
-        store.remove(session.id);
-        store.cancelFlow(readPlatformCookie(request.headers.cookie, PLATFORM_FLOW_COOKIE));
+        store.remove(session.id, session.record);
+        store.cancelFlow(session.id);
         // No cookie write: a delayed logout response must not erase another tab's
-        // newer login. These opaque values are now inert and expire/are replaced.
+        // newer login. The channel now has no grant and only a short-lived marker.
         return { loggedOut: true, scope: 'work', coreSessionRevoked: false };
     });
     app.get('/v1/tokenhub/platform/models', async (request, reply) => {

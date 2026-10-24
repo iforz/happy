@@ -3,7 +3,6 @@ import { isIP } from 'node:net';
 import { authcenterOrigin, AUTHCENTER_TIMEOUT_MS, type WorkClientContext } from './workAuthorization';
 
 export const PLATFORM_SESSION_COOKIE = '__Host-tokenhub-platform';
-export const PLATFORM_FLOW_COOKIE = '__Host-tokenhub-platform-flow';
 export const PLATFORM_CSRF_HEADER = 'x-tokenhub-csrf';
 const FLOW_LIFETIME_MS = 5 * 60_000;
 const MAX_SESSION_LIFETIME_MS = 24 * 60 * 60_000;
@@ -26,64 +25,101 @@ export interface PlatformRecord {
 export interface PlatformFlow { state: string; nonce: string; verifier: string; binding: string; expiresAt: number }
 export class PlatformCapacityError extends Error {}
 
-/** Deliberately independent of Happy account IDs, public keys and identity bindings. */
+interface PlatformChannel {
+    expiresAt: number;
+    absoluteExpiresAt: number;
+    record?: PlatformRecord;
+    flow?: PlatformFlow;
+}
+
+/** A server-issued browser channel, not an authenticated identity. Only a verified
+ * current flow can attach a principal. Keeping its cookie stable prevents delayed
+ * login/logout responses from replacing a newer account's browser credentials. */
 export class PlatformSessionStore {
-    private sessions = new Map<string, PlatformRecord>();
+    private channels = new Map<string, PlatformChannel>();
     private flows = new Map<string, PlatformFlow>();
-    private activeFlows = new Map<string, PlatformFlow>();
-    constructor(private now = Date.now, private maxSessions = 5000, private maxFlows = 5000) {}
-    private prune() {
-        for (const [key, value] of this.sessions) if (value.principal.expiresAt <= this.now()) this.removeHashed(key);
-        for (const [key, value] of this.activeFlows) if (value.expiresAt <= this.now()) this.cancelFlow(key);
+    constructor(private now = Date.now, private maxChannels = 5000, private maxFlows = 5000) {}
+    private key(id: string) { return createHash('sha256').update(id).digest('hex'); }
+    private channel(id: string) { return validOpaque(id) ? this.channels.get(this.key(id)) : undefined; }
+    private revokeRecord(channel: PlatformChannel) {
+        const record = channel.record;
+        channel.record = undefined;
+        for (const controller of record?.streams ?? []) controller.abort('authorization_revoked');
+        record?.streams.clear();
     }
-    start(): PlatformFlow {
+    private prune() {
+        for (const [key, channel] of this.channels) {
+            if (channel.expiresAt <= this.now() || (channel.record && channel.record.principal.expiresAt <= this.now())) {
+                this.revokeRecord(channel);
+                if (channel.flow) this.flows.delete(channel.flow.state);
+                this.channels.delete(key);
+            } else if (channel.flow && channel.flow.expiresAt <= this.now()) {
+                this.flows.delete(channel.flow.state);
+                channel.flow = undefined;
+            }
+        }
+    }
+    start(existingId: string): { id: string; created: boolean; expiresAt: number; flow: PlatformFlow } {
         this.prune();
-        if (this.activeFlows.size >= this.maxFlows) throw new PlatformCapacityError('Platform flow capacity reached');
-        const flow = { state: opaque(), nonce: opaque(), verifier: opaque(), binding: opaque(), expiresAt: this.now() + FLOW_LIFETIME_MS };
+        let channel = this.channel(existingId);
+        // A consumed exchange still owns a flow slot until completed/cancelled.
+        const flowCount = [...this.channels.values()].filter(value => value.flow).length;
+        if (flowCount - (channel?.flow ? 1 : 0) >= this.maxFlows) throw new PlatformCapacityError('Platform flow capacity reached');
+        const created = !channel;
+        if (created && this.channels.size >= this.maxChannels) throw new PlatformCapacityError('Platform channel capacity reached');
+        const id = channel ? existingId : opaque();
+        if (!channel) {
+            channel = { expiresAt: this.now() + FLOW_LIFETIME_MS, absoluteExpiresAt: this.now() + MAX_SESSION_LIFETIME_MS };
+            this.channels.set(this.key(id), channel);
+        }
+        this.cancelFlow(id);
+        const flow = { state: opaque(), nonce: opaque(), verifier: opaque(), binding: id, expiresAt: Math.min(this.now() + FLOW_LIFETIME_MS, channel.absoluteExpiresAt) };
+        if (!channel.record) channel.expiresAt = flow.expiresAt;
+        channel.flow = flow;
         this.flows.set(flow.state, flow);
-        this.activeFlows.set(flow.binding, flow);
-        return flow;
+        return { id, created, expiresAt: channel.absoluteExpiresAt, flow };
     }
     consume(state: string, binding: string): PlatformFlow {
         this.prune();
         const flow = this.flows.get(state);
-        if (!flow || !equalOpaque(binding, flow.binding)) throw new Error('Invalid platform login state');
+        if (!flow || !equalOpaque(binding, flow.binding) || this.channel(binding)?.flow !== flow) throw new Error('Invalid platform login state');
         this.flows.delete(state);
         return flow;
     }
-    isCurrentFlow(flow: PlatformFlow) { this.prune(); return this.activeFlows.get(flow.binding) === flow; }
-    cancelFlow(binding: string) {
-        const flow = this.activeFlows.get(binding);
-        if (flow) this.flows.delete(flow.state);
-        this.activeFlows.delete(binding);
+    isCurrentFlow(flow: PlatformFlow) { this.prune(); return this.channel(flow.binding)?.flow === flow; }
+    cancelFlow(binding: string, expected?: PlatformFlow) {
+        const channel = this.channel(binding), flow = channel?.flow;
+        if (!channel || !flow || (expected && flow !== expected)) return;
+        this.flows.delete(flow.state);
+        channel.flow = undefined;
     }
-    create(principal: PlatformPrincipal, grant: string): { id: string; record: PlatformRecord } {
-        this.prune();
-        if (this.sessions.size >= this.maxSessions) throw new PlatformCapacityError('Platform session capacity reached');
-        const id = opaque(), record = {
-            principal: { ...principal, expiresAt: Math.min(principal.expiresAt, this.now() + MAX_SESSION_LIFETIME_MS) },
+    complete(flow: PlatformFlow, principal: PlatformPrincipal, grant: string): PlatformRecord {
+        if (!this.isCurrentFlow(flow)) throw new Error('Platform login was cancelled');
+        const channel = this.channel(flow.binding)!;
+        const record: PlatformRecord = {
+            principal: { ...principal, expiresAt: Math.min(principal.expiresAt, channel.absoluteExpiresAt) },
             grant, csrf: opaque(), streams: new Set<AbortController>(),
         };
-        this.sessions.set(createHash('sha256').update(id).digest('hex'), record);
-        return { id, record };
+        if (record.principal.expiresAt <= this.now()) throw new Error('Platform login expired');
+        // Synchronous replacement: no request can observe the old grant after commit.
+        this.revokeRecord(channel);
+        channel.record = record;
+        channel.expiresAt = channel.absoluteExpiresAt;
+        this.cancelFlow(flow.binding, flow);
+        return record;
     }
-    get(id: string): PlatformRecord | undefined {
+    get(id: string): PlatformRecord | undefined { this.prune(); return this.channel(id)?.record; }
+    remove(id: string, expected?: PlatformRecord) {
         this.prune();
-        return validOpaque(id) ? this.sessions.get(createHash('sha256').update(id).digest('hex')) : undefined;
-    }
-    remove(id: string) {
-        if (validOpaque(id)) this.removeHashed(createHash('sha256').update(id).digest('hex'));
-    }
-    private removeHashed(key: string) {
-        const record = this.sessions.get(key);
-        this.sessions.delete(key);
-        for (const controller of record?.streams ?? []) controller.abort('authorization_revoked');
-        record?.streams.clear();
+        const channel = this.channel(id);
+        if (!channel || (expected && channel.record !== expected)) return;
+        this.revokeRecord(channel);
+        channel.expiresAt = Math.min(this.now() + FLOW_LIFETIME_MS, channel.absoluteExpiresAt);
     }
     clear() {
-        for (const key of this.sessions.keys()) this.removeHashed(key);
+        for (const channel of this.channels.values()) this.revokeRecord(channel);
+        this.channels.clear();
         this.flows.clear();
-        this.activeFlows.clear();
     }
 }
 
@@ -97,7 +133,10 @@ export function platformCookie(name: string, value: string, maxAge: number): str
     return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.max(0, Math.floor(maxAge))}`;
 }
 export function publicPlatformSession(record: PlatformRecord) {
-    const { authority, issuer, subject, sessionId, expiresAt } = record.principal;
+    const { authority, issuer, subject, expiresAt } = record.principal;
+    // Public generation marker, not the Core SID or an authentication credential.
+    // A persisted logout intent must not target a newer login sharing the Core SID.
+    const sessionId = createHash('sha256').update(record.csrf).digest('hex');
     return { authority, issuer, subject, sessionId, expiresAt, csrf: record.csrf };
 }
 

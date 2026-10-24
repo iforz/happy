@@ -58,6 +58,17 @@ describe('seedless Work platform authentication', () => {
         expect(isPlatformRoute('/tokenhub/callback')).toBe(true);
         expect(isPlatformRoute('/new', 'device')).toBe(false); expect(isPlatformRoute('/device-agents')).toBe(false);
     });
+    it.each([
+        [{}, true], [{ platform: false, legacy: false }, true], [{ platform: true }, true],
+        [{ legacy: true }, false], [{ platform: true, legacy: true }, true],
+    ] as const)('classifies callbacks by explicit pending flow with platform precedence %#', (flows, expected) => {
+        expect(isPlatformRoute('/tokenhub/callback', undefined, flows)).toBe(expected);
+    });
+    it('callback flow hints cannot turn an explicit device route into platform or hijack normal Home', () => {
+        expect(isPlatformRoute('/device-agents', undefined, { platform: true })).toBe(false);
+        expect(isPlatformRoute('/new', 'device', { platform: true })).toBe(false);
+        expect(isPlatformRoute('/', undefined, { legacy: true })).toBe(true);
+    });
     it('starts with no Happy identity and stores only one-time navigation state', async () => {
         await begin();
         expect(f.fetch).toHaveBeenCalledOnce();

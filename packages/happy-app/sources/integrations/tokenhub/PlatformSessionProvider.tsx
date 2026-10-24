@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Platform } from 'react-native';
-import { platformSessionEnabled, readPlatformSession, completePlatformLogin, endPlatformSession, type PlatformSession } from './platformSession';
+import { platformSessionEnabled, readPlatformSession, completePlatformLogin, endPlatformSession, readPlatformSignOutIntent, rememberPlatformSignOut, clearPlatformSignOutIntent, matchesPlatformSignOut, type PlatformSession } from './platformSession';
 
 type State = { status: 'disabled' | 'loading' | 'ready' | 'error'; session: PlatformSession | null };
 type Context = State & { refresh: () => Promise<void>; complete: (url: string) => Promise<void>; logout: () => Promise<void> };
@@ -15,13 +15,33 @@ export function PlatformSessionProvider({ children }: { children: React.ReactNod
         if (!enabled) return;
         const generation = ++epoch.current;
         active.current?.abort(); const controller = new AbortController(); active.current = controller;
-        setState(current => current.session && !pendingLogout.current ? current : { status: 'loading', session: null });
+        const intent = readPlatformSignOutIntent();
+        setState(current => current.session && !pendingLogout.current && !intent ? current : { status: 'loading', session: null });
         const timeout = setTimeout(() => controller.abort(), 15000);
         try {
             // A failed explicit sign-out must not silently turn into a sign-in on focus/retry.
-            if (pendingLogout.current) { await endPlatformSession(pendingLogout.current); pendingLogout.current = null; }
+            if (pendingLogout.current) {
+                const pending = pendingLogout.current;
+                await endPlatformSession(pending);
+                if (epoch.current !== generation) return;
+                if (pendingLogout.current === pending) pendingLogout.current = null;
+                clearPlatformSignOutIntent(intent, true);
+                setState({ status: 'ready', session: null });
+                return;
+            }
+            // If storage was blocked, the URL contains only a stop marker. Do not
+            // guess which account to revoke, and never restore it automatically.
+            if (intent && 'unknown' in intent) { setState({ status: 'ready', session: null }); return; }
             const session = await readPlatformSession(controller.signal);
-            if (epoch.current === generation) setState({ status: 'ready', session });
+            if (epoch.current !== generation) return;
+            if (intent) {
+                if (session && matchesPlatformSignOut(intent, session)) await endPlatformSession(session);
+                if (epoch.current !== generation) return;
+                if (!session || matchesPlatformSignOut(intent, session)) clearPlatformSignOutIntent(intent, true);
+                // A newer cookie belongs to a different login. Do not log it out
+                // or show it on this explicitly signed-out page without a click.
+                setState({ status: 'ready', session: null });
+            } else setState({ status: 'ready', session });
         } catch { if (epoch.current === generation) setState({ status: 'error', session: null }); }
         finally { clearTimeout(timeout); }
     }, [enabled]);
@@ -43,17 +63,20 @@ export function PlatformSessionProvider({ children }: { children: React.ReactNod
         if (generation !== epoch.current) throw new Error('Work sign-in changed. Please retry.');
         // This explicit newer login supersedes any failed sign-out of the old session.
         pendingLogout.current = null;
+        clearPlatformSignOutIntent();
         setState({ status: 'ready', session });
     }, []);
     const logout = React.useCallback(async () => {
         const session = pendingLogout.current ?? state.session;
         pendingLogout.current = session;
+        rememberPlatformSignOut(session);
+        const intent = readPlatformSignOutIntent();
         const generation = ++epoch.current;
         active.current?.abort(); setState({ status: 'loading', session: null });
         try {
             if (session) await endPlatformSession(session);
             if (pendingLogout.current === session) pendingLogout.current = null;
-            if (epoch.current === generation) setState({ status: 'ready', session: null });
+            if (epoch.current === generation) { clearPlatformSignOutIntent(intent, true); setState({ status: 'ready', session: null }); }
         } catch {
             if (epoch.current === generation) setState({ status: 'error', session: null });
             throw new Error('Work sign-out could not be confirmed. Please retry.');

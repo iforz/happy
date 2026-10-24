@@ -78,6 +78,7 @@ function json(value: unknown, status = 200) {
 }
 function assertNoCredentials(response: ResponseLike) {
     expect(response.body).not.toContain(grant);
+    for (const sid of [coreSid, 'newer-core-work-sid', 'winning-core-work-sid']) expect(response.body).not.toContain(sid);
     for (const name of ['authorizationToken', 'authorization_token', 'id_token', 'publicKey', 'privateKey', 'code_verifier', 'signature', 'seed']) {
         expect(response.body).not.toContain(`"${name}"`);
     }
@@ -105,18 +106,25 @@ function setup(options: Options = {}) {
     const env = { ...enabledEnv, ...options.env };
     const flows = new Map<string, Flow>();
     const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const state = { coreUnavailable: options.coreUnavailable ?? false, core: options.core ?? {}, slowStream: false, deferExchange: false };
+    const state = { coreUnavailable: options.coreUnavailable ?? false, core: options.core ?? {}, claims: options.claims ?? {}, slowStream: false, deferExchange: false, deferNextVerify: false, deferNextMetadata: false };
     const streamCancelled = vi.fn();
     let streamStartedResolve: (() => void) | undefined;
     const streamStarted = new Promise<void>(resolve => { streamStartedResolve = resolve; });
     let exchangeStartedResolve: (() => void) | undefined, releaseExchangeResolve: (() => void) | undefined;
     const exchangeStarted = new Promise<void>(resolve => { exchangeStartedResolve = resolve; });
     const exchangeRelease = new Promise<void>(resolve => { releaseExchangeResolve = resolve; });
+    let verifyStartedResolve: (() => void) | undefined, releaseVerifyResolve: (() => void) | undefined;
+    const verifyStarted = new Promise<void>(resolve => { verifyStartedResolve = resolve; });
+    const verifyRelease = new Promise<void>(resolve => { releaseVerifyResolve = resolve; });
+    let metadataStartedResolve: (() => void) | undefined, releaseMetadataResolve: (() => void) | undefined;
+    const metadataStarted = new Promise<void>(resolve => { metadataStartedResolve = resolve; });
+    const metadataRelease = new Promise<void>(resolve => { releaseMetadataResolve = resolve; });
     const transport = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input); calls.push({ url, init });
         expect(init?.redirect).toBe('error');
         expect(init?.credentials).toBe('omit');
         if (url === authority + '/api/v1/auth/happy/metadata') {
+            if (state.deferNextMetadata) { state.deferNextMetadata = false; metadataStartedResolve?.(); await metadataRelease; }
             return json({ code: 0, data: { enabled: true, issuer: 'sso-issuer', audience: 'happy-web', jwks_path: 'https://attacker.test/keys', ...options.metadata } });
         }
         if (url === authority + '/api/v1/auth/sso/jwks') {
@@ -134,7 +142,7 @@ function setup(options: Options = {}) {
             expect(body.code_verifier).not.toBe(flow!.nonce);
             if (state.deferExchange) { exchangeStartedResolve?.(); await exchangeRelease; }
             const seconds = Math.floor(now / 1000);
-            const claims = { iss: 'sso-issuer', sub: '42', aud: 'happy-web', nonce: flow!.nonce, jti: randomBytes(32).toString('base64url'), iat: seconds, nbf: seconds, exp: seconds + 60, ...options.claims };
+            const claims = { iss: 'sso-issuer', sub: '42', aud: 'happy-web', nonce: flow!.nonce, jti: randomBytes(32).toString('base64url'), iat: seconds, nbf: seconds, exp: seconds + 60, ...state.claims };
             const assertion = options.hs256
                 ? jwt.sign(claims, 'synthetic-wrong-algorithm', { algorithm: 'HS256', keyid: 'platform-test' })
                 : jwt.sign(claims, options.wrongSignature ? otherKey.privateKey : key.privateKey, { algorithm: 'RS256', keyid: 'platform-test' });
@@ -144,8 +152,11 @@ function setup(options: Options = {}) {
             expect(init?.method).toBe('POST');
             expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${grant}`);
             expect(JSON.parse(String(init?.body))).toEqual({ application: 'work' });
-            if (state.coreUnavailable) return json({ error: 'synthetic authority outage' }, 503);
-            return json({ active: true, application: 'work', issuer: 'tokenapi', subject: '42', session_id: coreSid, expires_at: expiresAt / 1000, permissions: ['work:access'], ...state.core });
+            const unavailable = state.coreUnavailable;
+            const result = { active: true, application: 'work', issuer: 'tokenapi', subject: '42', session_id: coreSid, expires_at: expiresAt / 1000, permissions: ['work:access'], ...state.core };
+            if (state.deferNextVerify) { state.deferNextVerify = false; verifyStartedResolve?.(); await verifyRelease; }
+            if (unavailable) return json({ error: 'synthetic authority outage' }, 503);
+            return json(result);
         }
         if (url === authcenter + '/v1/session/revoke') {
             expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${grant}`);
@@ -187,16 +198,25 @@ function setup(options: Options = {}) {
         const response = await app.inject({ method: 'POST', url: prefix + '/start', headers: { ...browserHeaders, ...headers }, payload: {} });
         expect(response.statusCode, response.body).toBe(200);
         const data = response.json(); const url = new URL(data.authorizeUrl);
-        const flow: Flow = { state: data.state, nonce: url.searchParams.get('nonce')!, challenge: url.searchParams.get('code_challenge')!, cookie: cookie(response, flowCookieName), code: 'synthetic-code-' + flows.size, response };
+        const channel = setCookies(response).some(value => value.startsWith(sessionCookieName + '='))
+            ? cookie(response, sessionCookieName)
+            : headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(sessionCookieName + '='));
+        if (!channel) throw new Error('Start must issue or retain a server-known browser channel');
+        const flow: Flow = { state: data.state, nonce: url.searchParams.get('nonce')!, challenge: url.searchParams.get('code_challenge')!, cookie: channel, code: 'synthetic-code-' + flows.size, response };
         flows.set(flow.code, flow); return flow;
     };
-    const complete = (flow: Flow, headers: Record<string, string> = {}) => app.inject({ method: 'POST', url: prefix + '/complete', headers: { ...browserHeaders, cookie: flow.cookie, ...headers }, payload: { state: flow.state, code: flow.code } });
-    const login = async () => {
-        const flow = await start(); const response = await complete(flow);
-        expect(response.statusCode, response.body).toBe(200);
-        return { flow, response, session: response.json(), cookie: cookie(response, sessionCookieName) };
+    const complete = async (flow: Flow, headers: Record<string, string> = {}) => {
+        const response = await app.inject({ method: 'POST', url: prefix + '/complete', headers: { ...browserHeaders, cookie: flow.cookie, ...headers }, payload: { state: flow.state, code: flow.code } });
+        expect(response.headers['set-cookie']).toBeUndefined();
+        assertNoCredentials(response);
+        return response;
     };
-    return { app, calls, state, transport, legacyVerify, legacyHandler, pageConfig, start, complete, login, expiresAt, streamStarted, streamCancelled, exchangeStarted, releaseExchange: () => releaseExchangeResolve?.(), advance: (ms: number) => { now += ms; } };
+    const login = async (headers: Record<string, string> = {}) => {
+        const flow = await start(headers); const response = await complete(flow);
+        expect(response.statusCode, response.body).toBe(200);
+        return { flow, response, session: response.json(), cookie: flow.cookie };
+    };
+    return { app, calls, state, transport, legacyVerify, legacyHandler, pageConfig, start, complete, login, expiresAt, streamStarted, streamCancelled, exchangeStarted, releaseExchange: () => releaseExchangeResolve?.(), verifyStarted, releaseVerify: () => releaseVerifyResolve?.(), metadataStarted, releaseMetadata: () => releaseMetadataResolve?.(), advance: (ms: number) => { now += ms; } };
 }
 
 describe('independent TokenHub platform login', () => {
@@ -212,25 +232,27 @@ describe('independent TokenHub platform login', () => {
         expect(new Set([flow.state, flow.nonce, flow.challenge, binding]).size).toBe(4);
         const response = await f.complete(flow); expect(response.statusCode, response.body).toBe(200);
         expect(Object.keys(response.json()).sort()).toEqual(['authority', 'csrf', 'expiresAt', 'issuer', 'sessionId', 'subject']);
-        expect(response.json()).toEqual({ authority, issuer: 'tokenapi', subject: '42', sessionId: coreSid, expiresAt: f.expiresAt, csrf: expect.stringMatching(/^[A-Za-z0-9_-]{43,128}$/) });
+        expect(response.json()).toEqual({ authority, issuer: 'tokenapi', subject: '42', sessionId: expect.stringMatching(/^[a-f0-9]{64}$/), expiresAt: f.expiresAt, csrf: expect.stringMatching(/^[A-Za-z0-9_-]{43,128}$/) });
         expect(response.headers['cache-control']).toBe('no-store'); assertNoCredentials(response);
         expect(f.legacyVerify).not.toHaveBeenCalled();
         expect(f.calls.map(call => call.url)).toEqual(expect.arrayContaining([authority + '/api/v1/auth/sso/jwks', authcenter + '/v1/session/verify']));
         expect(f.calls.some(call => call.url.includes('attacker.test'))).toBe(false);
     });
 
-    it('sets host-only secure HttpOnly Lax cookies with bounded lifetime and clears only its own flow cookie', async () => {
+    it('sets only a bounded host-only secure HttpOnly Lax browser channel at start and never rewrites it on completion', async () => {
         const f = setup(); const logged = await f.login();
         for (const response of [logged.flow.response, logged.response]) {
             for (const header of setCookies(response)) {
                 expect(header).toContain('Path=/'); expect(header).toContain('HttpOnly'); expect(header).toContain('Secure'); expect(header).toContain('SameSite=Lax'); expect(header).not.toMatch(/Domain=/i);
                 expect(header).not.toContain('__Host-happy-tokenhub');
+                expect(header).not.toContain(flowCookieName);
             }
         }
-        expect(setCookies(logged.response).some(value => value.startsWith(flowCookieName + '=;') && value.includes('Max-Age=0'))).toBe(true);
-        const sessionHeader = setCookies(logged.response).find(value => value.startsWith(sessionCookieName + '='))!;
+        expect(logged.response.headers['set-cookie']).toBeUndefined();
+        expect(setCookies(logged.flow.response)).toHaveLength(1);
+        const sessionHeader = setCookies(logged.flow.response).find(value => value.startsWith(sessionCookieName + '='))!;
         expect(Number(sessionHeader.match(/Max-Age=(\d+)/)?.[1])).toBeGreaterThan(0);
-        expect(Number(sessionHeader.match(/Max-Age=(\d+)/)?.[1])).toBeLessThanOrEqual(60);
+        expect(Number(sessionHeader.match(/Max-Age=(\d+)/)?.[1])).toBeLessThanOrEqual(24 * 60 * 60);
         const opaque = logged.cookie.split('=')[1]; expect(opaque).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
         expect(opaque).not.toBe(coreSid); expect(opaque).not.toBe(grant); expect(opaque).not.toBe(logged.session.csrf);
     });
@@ -240,7 +262,7 @@ describe('independent TokenHub platform login', () => {
         expect(response.statusCode).toBe(403); expect(f.transport).not.toHaveBeenCalled();
     });
 
-    it.each([{ publicKey: 'unwanted-key' }, { signature: 'unwanted-proof' }, { redirect_uri: 'https://attacker.test' }, { client_id: 'happy-native' }])('rejects client-supplied login authority or Happy key fields %j', async payload => {
+    it.each([{ publicKey: 'unwanted-key' }, { signature: 'unwanted-proof' }, { redirect_uri: 'https://attacker.test' }, { client_id: 'happy-native' }, { channelId: 'attacker-chosen-channel' }])('rejects client-supplied login authority or Happy key fields %j', async payload => {
         const f = setup(); const response = await f.app.inject({ method: 'POST', url: prefix + '/start', headers: browserHeaders, payload });
         expect(response.statusCode).toBe(400); expect(f.transport).not.toHaveBeenCalled();
     });
@@ -248,7 +270,7 @@ describe('independent TokenHub platform login', () => {
     it('rejects missing/wrong state binding, rejects a foreign callback origin, and consumes successful state once', async () => {
         const f = setup(); const flow = await f.start(); const before = f.calls.length;
         const request = { method: 'POST' as const, url: prefix + '/complete', headers: { ...browserHeaders, cookie: flow.cookie }, payload: { state: flow.state, code: flow.code } };
-        for (const headers of [{ ...browserHeaders }, { ...browserHeaders, cookie: flowCookieName + '=' + 'b'.repeat(43) }, { ...browserHeaders, origin: 'https://attacker.test', cookie: flow.cookie }]) {
+        for (const headers of [{ ...browserHeaders }, { ...browserHeaders, cookie: sessionCookieName + '=' + 'b'.repeat(43) }, { ...browserHeaders, origin: 'https://attacker.test', cookie: flow.cookie }]) {
             const rejected = await f.app.inject({ ...request, headers }); expect([400, 403]).toContain(rejected.statusCode); expect(f.calls).toHaveLength(before);
         }
         const badState = await f.app.inject({ ...request, payload: { ...request.payload, state: 'x'.repeat(43) } }); expect(badState.statusCode).toBe(400);
@@ -449,8 +471,8 @@ describe('platform session authorization and legacy isolation', () => {
         const delayedLogout = await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf }, payload: {} });
         expect(delayedLogout.statusCode).toBe(200);
         const nextFlow = await f.start({ cookie: first.cookie });
-        const newerLogin = await f.complete(nextFlow, { cookie: nextFlow.cookie + '; ' + first.cookie }); expect(newerLogin.statusCode).toBe(200);
-        const newerCookie = cookie(newerLogin, sessionCookieName), newerSession = newerLogin.json();
+        const newerLogin = await f.complete(nextFlow); expect(newerLogin.statusCode).toBe(200);
+        const newerCookie = nextFlow.cookie, newerSession = newerLogin.json(); expect(newerCookie).toBe(first.cookie);
         const browserCookies = new Map([[sessionCookieName, newerCookie.split('=')[1]]]);
         // Deliver A's already-generated logout response only after B's login cookie.
         for (const header of setCookies(delayedLogout)) {
@@ -462,21 +484,22 @@ describe('platform session authorization and legacy isolation', () => {
         const currentCookie = [...browserCookies].map(([name, value]) => name + '=' + value).join('; '); expect(currentCookie).toBe(newerCookie);
         const session = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: currentCookie } }); expect(session.statusCode).toBe(200); expect(session.json()).toEqual(newerSession);
         const models = await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: currentCookie, 'x-tokenhub-csrf': newerSession.csrf } }); expect(models.statusCode).toBe(200);
-        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } })).statusCode).toBe(401);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf } })).statusCode).toBe(403);
     });
 
-    it('rotates an existing browser platform session on a new successful login', async () => {
-        const f = setup(); const first = await f.login(); const replacement = await f.start();
-        const response = await f.complete(replacement, { cookie: replacement.cookie + '; ' + first.cookie }); expect(response.statusCode).toBe(200);
-        const newCookie = cookie(response, sessionCookieName); expect(newCookie).not.toBe(first.cookie); expect(response.json().csrf).not.toBe(first.session.csrf);
-        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } })).statusCode).toBe(401);
-        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newCookie } })).statusCode).toBe(200);
+    it('retains the browser channel but rotates public record ID and CSRF even when relogin has the same Core SID', async () => {
+        const f = setup(); const first = await f.login(); const replacement = await f.start({ cookie: first.cookie });
+        expect(replacement.cookie).toBe(first.cookie); expect(replacement.response.headers['set-cookie']).toBeUndefined();
+        const response = await f.complete(replacement); expect(response.statusCode).toBe(200); expect(response.json().csrf).not.toBe(first.session.csrf);
+        expect(response.json().sessionId).toMatch(/^[a-f0-9]{64}$/); expect(response.json().sessionId).not.toBe(first.session.sessionId); expect(response.json().sessionId).not.toBe(coreSid);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf } })).statusCode).toBe(403);
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(response.json());
     });
 
     it('does not resurrect a platform session when a pending login finishes after browser logout', async () => {
         const f = setup(); const logged = await f.login(); const flow = await f.start({ cookie: logged.cookie });
         f.state.deferExchange = true;
-        const browserCookie = logged.cookie + '; ' + flow.cookie;
+        const browserCookie = flow.cookie; expect(browserCookie).toBe(logged.cookie);
         const pending = f.complete(flow, { cookie: browserCookie }).then(response => response);
         await f.exchangeStarted;
         const logout = await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': logged.session.csrf }, payload: {} });
@@ -495,7 +518,78 @@ describe('platform session authorization and legacy isolation', () => {
         expect(setCookies(obsolete).some(value => value.startsWith(sessionCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
         expect(setCookies(obsolete).some(value => value.startsWith(flowCookieName + '=') && value.includes('Max-Age=0'))).toBe(false);
         const good = await f.complete(current); expect(good.statusCode, good.body).toBe(200);
-        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: cookie(good, sessionCookieName) } })).statusCode).toBe(200);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: current.cookie } })).statusCode).toBe(200);
+    });
+
+    it('cannot replace a newer server principal when an earlier successful completion response arrives late', async () => {
+        const f = setup(); const first = await f.login(); const delayedSuccess = first.response;
+        f.state.claims = { sub: '99' }; f.state.core = { subject: '99', session_id: 'newer-core-work-sid' };
+        const newer = await f.login({ cookie: first.cookie }); expect(newer.cookie).toBe(first.cookie); expect(newer.session.subject).toBe('99');
+        expect(newer.flow.response.headers['set-cookie']).toBeUndefined(); expect(delayedSuccess.headers['set-cookie']).toBeUndefined();
+        // The old success response has no cookie operation to apply to the stable channel.
+        let browserCookie = newer.cookie;
+        for (const header of setCookies(delayedSuccess)) if (header.startsWith(sessionCookieName + '=')) browserCookie = header.split(';')[0];
+        expect(browserCookie).toBe(newer.cookie);
+        const session = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: browserCookie } }); expect(session.statusCode).toBe(200); expect(session.json()).toEqual(newer.session);
+        const beforeOldCsrf = f.calls.length;
+        for (const path of ['/models', '/stream', '/logout']) {
+            const rejected = await f.app.inject({ method: path === '/models' ? 'GET' : 'POST', url: prefix + path, headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': first.session.csrf }, ...(path === '/models' ? {} : { payload: path === '/stream' ? { model: 'model-a', prompt: 'hello' } : {} }) });
+            expect(rejected.statusCode).toBe(403);
+        }
+        expect(f.calls).toHaveLength(beforeOldCsrf);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': newer.session.csrf } })).statusCode).toBe(200);
+    });
+
+    it.each([false, true])('a captured old-session authority response cannot revoke a newer principal on the same channel (revoked=%s)', async revoked => {
+        const f = setup(); const first = await f.login(); f.state.core = { active: !revoked }; f.state.deferNextVerify = true;
+        const pending = f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } }).then(response => response); await f.verifyStarted;
+        f.state.claims = { sub: '99' }; f.state.core = { subject: '99', session_id: 'newer-core-work-sid' };
+        const newer = await f.login({ cookie: first.cookie }); expect(newer.cookie).toBe(first.cookie);
+        f.releaseVerify(); const obsolete = await pending; expect(obsolete.statusCode).toBe(401); expect(obsolete.headers['set-cookie']).toBeUndefined();
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(newer.session);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: newer.cookie, 'x-tokenhub-csrf': newer.session.csrf } })).statusCode).toBe(200);
+    });
+
+    it('never adopts an arbitrary browser-supplied channel identifier', async () => {
+        const f = setup(); const arbitrary = sessionCookieName + '=' + 'x'.repeat(43);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: arbitrary } })).statusCode).toBe(401);
+        const flow = await f.start({ cookie: arbitrary }); expect(flow.cookie).not.toBe(arbitrary); expect(setCookies(flow.response)).toHaveLength(1);
+        const before = f.calls.length; expect((await f.complete(flow, { cookie: arbitrary })).statusCode).toBe(400); expect(f.calls).toHaveLength(before);
+        expect((await f.complete(flow)).statusCode).toBe(200);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: arbitrary } })).statusCode).toBe(401);
+    });
+
+    it('fails closed for mismatched concurrent fresh starts and a late first-start cookie instead of switching authenticated accounts', async () => {
+        const f = setup(); const [first, second] = await Promise.all([f.start(), f.start()]); expect(first.cookie).not.toBe(second.cookie);
+        const mismatched = await f.complete(first, { cookie: second.cookie }); expect(mismatched.statusCode).toBe(400);
+        for (const channel of [first.cookie, second.cookie]) expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: channel } })).statusCode).toBe(401);
+        f.state.claims = { sub: '99' }; f.state.core = { subject: '99', session_id: 'winning-core-work-sid' };
+        const winner = await f.complete(second); expect(winner.statusCode).toBe(200);
+        // Deliver the older fresh-start response after the winning channel logged in.
+        const lateCookie = cookie(first.response, sessionCookieName); expect(lateCookie).toBe(first.cookie);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: lateCookie } })).statusCode).toBe(401);
+        const retry = await f.start({ cookie: lateCookie }); expect(retry.cookie).toBe(lateCookie); expect(retry.response.headers['set-cookie']).toBeUndefined();
+        expect((await f.complete(first)).statusCode).toBe(400);
+        const restored = await f.complete(retry); expect(restored.statusCode).toBe(200);
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: retry.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(restored.json());
+    });
+
+    it.each(['expired', 'restarted'])('rejects a stale %s channel and issues a new one only on an explicit start', async mode => {
+        const original = setup(); const logged = await original.login(); const f = mode === 'restarted' ? setup() : original;
+        if (mode === 'expired') f.advance(61_000);
+        const rejected = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } }); expect(rejected.statusCode).toBe(401); expect(rejected.headers['set-cookie']).toBeUndefined();
+        const replacement = await f.start({ cookie: logged.cookie }); expect(replacement.cookie).not.toBe(logged.cookie); expect(setCookies(replacement.response)).toHaveLength(1);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: replacement.cookie } })).statusCode).toBe(401);
+    });
+
+    it('does not let a slower known-channel start supersede or cancel the newer start after metadata resolves', async () => {
+        const f = setup({ maxSessions: 1, maxFlows: 1 }); const channel = await f.start(); f.state.deferNextMetadata = true;
+        const pending = f.app.inject({ method: 'POST', url: prefix + '/start', headers: { ...browserHeaders, cookie: channel.cookie }, payload: {} }).then(response => response); await f.metadataStarted;
+        const newest = await f.start({ cookie: channel.cookie }); expect(newest.cookie).toBe(channel.cookie); expect(newest.response.headers['set-cookie']).toBeUndefined();
+        f.releaseMetadata(); const slower = await pending; expect(slower.statusCode).toBe(503); expect(slower.headers['set-cookie']).toBeUndefined();
+        expect((await f.complete(channel)).statusCode).toBe(400);
+        const success = await f.complete(newest); expect(success.statusCode).toBe(200);
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newest.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(success.json());
     });
 });
 
@@ -524,25 +618,61 @@ describe('bounded platform session memory', () => {
         const success = await f.complete(current); expect(success.statusCode, success.body).toBe(200);
     });
 
-    it('refuses additional sessions without evicting an existing authenticated browser, then frees capacity on logout', async () => {
-        const f = setup({ maxSessions: 1 }); const first = await f.login(); const extra = await f.start();
-        const overflow = await f.complete(extra); expect(overflow.statusCode).toBe(503); expect(overflow.json()).toMatchObject({ platform: true, enabled: true });
-        expect(setCookies(overflow).some(value => value.startsWith(sessionCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
+    it('refuses additional browser channels without evicting an authenticated browser or its reusable logout marker', async () => {
+        const f = setup({ maxSessions: 1 }); const first = await f.login();
+        const extraStart = () => f.app.inject({ method: 'POST', url: prefix + '/start', headers: browserHeaders, payload: {} });
+        const overflow = await extraStart(); expect(overflow.statusCode).toBe(503); expect(overflow.json()).toMatchObject({ platform: true, enabled: true }); expect(overflow.headers['set-cookie']).toBeUndefined();
         const existing = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } }); expect(existing.statusCode).toBe(200); expect(existing.json()).toEqual(first.session);
         expect((await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf }, payload: {} })).statusCode).toBe(200);
-        const replacement = await f.login(); expect(replacement.cookie).not.toBe(first.cookie);
+        expect((await extraStart()).statusCode).toBe(503);
+        const reused = await f.start({ cookie: first.cookie }); expect(reused.cookie).toBe(first.cookie); expect(reused.response.headers['set-cookie']).toBeUndefined();
+        f.advance(300_001); const replacement = await f.start(); expect(replacement.cookie).not.toBe(first.cookie);
     });
 
     it('caps the session and cookie lifetime at 24 hours even when Core authorizes a later expiry', async () => {
         const lifetime = 24 * 60 * 60_000; const before = Date.now();
         const f = setup({ core: { expires_at: Math.floor(before / 1000) + 3 * 24 * 60 * 60 } }); const logged = await f.login();
         expect(logged.session.expiresAt).toBeGreaterThanOrEqual(before + lifetime); expect(logged.session.expiresAt).toBeLessThanOrEqual(Date.now() + lifetime);
-        const header = setCookies(logged.response).find(value => value.startsWith(sessionCookieName + '='))!;
+        const header = setCookies(logged.flow.response).find(value => value.startsWith(sessionCookieName + '='))!;
         expect(Number(header.match(/Max-Age=(\d+)/)?.[1])).toBe(24 * 60 * 60);
         f.advance(lifetime - 1);
         expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } })).statusCode).toBe(200);
         f.advance(1);
         expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } })).statusCode).toBe(401);
+    });
+
+    it('expires an anonymous issued channel after five minutes and frees its bounded slot', async () => {
+        const f = setup({ maxSessions: 1 }); const old = await f.start(); f.advance(299_999);
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/start', headers: browserHeaders, payload: {} })).statusCode).toBe(503);
+        f.advance(1); const fresh = await f.start(); expect(fresh.cookie).not.toBe(old.cookie);
+        expect((await f.complete(old)).statusCode).toBe(400);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: old.cookie } })).statusCode).toBe(401);
+    });
+
+    it('retains a logout marker for at most five minutes without preserving authentication or permanently consuming capacity', async () => {
+        const f = setup({ maxSessions: 1, core: { expires_at: Math.floor(Date.now() / 1000) + 600 } }); const logged = await f.login(); f.advance(10_000);
+        const logout = await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: logged.cookie, 'x-tokenhub-csrf': logged.session.csrf }, payload: {} }); expect(logout.statusCode).toBe(200); expect(logout.headers['set-cookie']).toBeUndefined();
+        f.advance(299_999);
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/start', headers: browserHeaders, payload: {} })).statusCode).toBe(503);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } })).statusCode).toBe(401);
+        f.advance(1); const next = await f.start(); expect(next.cookie).not.toBe(logged.cookie);
+    });
+
+    it('does not slide a channel absolute lifetime when the same browser signs in again', async () => {
+        const f = setup({ core: { expires_at: Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60 } }); const first = await f.login();
+        f.advance(23 * 60 * 60_000); const newer = await f.login({ cookie: first.cookie });
+        expect(newer.cookie).toBe(first.cookie); expect(newer.session.expiresAt).toBe(first.session.expiresAt); expect(newer.flow.response.headers['set-cookie']).toBeUndefined();
+        f.advance(60 * 60_000 - 1); expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } })).statusCode).toBe(200);
+        f.advance(1); expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } })).statusCode).toBe(401);
+        const fresh = await f.start({ cookie: newer.cookie }); expect(fresh.cookie).not.toBe(newer.cookie);
+    });
+
+    it('never extends a near-expiry channel past its absolute lifetime when logout retains an anonymous marker', async () => {
+        const f = setup({ maxSessions: 1, core: { expires_at: Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60 } }); const first = await f.login(); f.advance(24 * 60 * 60_000 - 1000);
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf }, payload: {} })).statusCode).toBe(200);
+        const reused = await f.start({ cookie: first.cookie }); expect(reused.cookie).toBe(first.cookie); expect(reused.response.headers['set-cookie']).toBeUndefined();
+        f.advance(1000); const fresh = await f.start({ cookie: first.cookie }); expect(fresh.cookie).not.toBe(first.cookie);
+        expect((await f.complete(reused)).statusCode).toBe(400);
     });
 });
 

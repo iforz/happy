@@ -10,7 +10,8 @@ import { workText as t } from '@/integrations/tokenhub/workText';
 export default function TokenHubCallback() {
     const platform = usePlatformSession();
     // A previous device/native flow remains deliberately separate from platform sign-in.
-    if (platform.status !== 'disabled' && (hasPlatformLogin(window.location.href) || !hasMatchingWebLogin(window.location.href))) return <PlatformCallback />;
+    const [platformFlow] = React.useState(() => platform.status !== 'disabled' && (hasPlatformLogin(window.location.href) || !hasMatchingWebLogin(window.location.href)));
+    if (platformFlow) return <PlatformCallback />;
     return <DeviceCallback />;
 }
 function PlatformCallback() {
@@ -36,7 +37,7 @@ function PlatformCallback() {
     </View>;
 }
 function DeviceCallback() {
-    const auth = useAuth(), router = useRouter(); const [message, setMessage] = React.useState('正在验证登录…');
+    const auth = useAuth(), router = useRouter(), platform = usePlatformSession(); const [message, setMessage] = React.useState('正在验证登录…');
     const started = React.useRef(false);
     const [nativeUrl, setNativeUrl] = React.useState<string | null>(null);
     React.useEffect(() => {
@@ -51,7 +52,7 @@ function DeviceCallback() {
                     window.location.assign(target); return;
                 }
             }
-            await saveTokenHubLogin(await completeTokenHubLogin(url), auth.login); router.replace('/');
+            await saveTokenHubLogin(await completeTokenHubLogin(url), auth.login); router.replace(platform.status !== 'disabled' ? '/device-agents' : '/');
         })().catch(e => setMessage(e instanceof Error ? e.message : '登录失败，请重新开始。'));
     }, [auth, router]);
     return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 24 }}><Text accessibilityRole="header">{message}</Text>{nativeUrl ? <Pressable onPress={() => window.location.assign(nativeUrl)}><Text>打开 Work App</Text></Pressable> : null}<Pressable onPress={() => router.replace('/')}><Text>返回 Work</Text></Pressable><Pressable onPress={() => router.push('/restore')}><Text>恢复原有加密身份</Text></Pressable></View>;

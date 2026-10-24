@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
 import fastify from 'fastify';
 import { Server } from 'socket.io';
 import { enableAuthentication } from '../api/utils/enableAuthentication';
@@ -12,8 +13,13 @@ vi.mock('@/storage/db', () => ({ db: { account: { upsert: vi.fn() } } }));
 vi.mock('@/app/auth/auth', () => ({ auth: { createToken: vi.fn() } }));
 vi.mock('@/utils/log', () => ({ debug: vi.fn(), log: vi.fn() }));
 
-// Exercise the real WebSocket transport with Node's built-in client, without adding
-// an undeclared socket.io-client dependency to the independently packaged server.
+// Exercise the real WebSocket transport on Node 20 as well as newer runtimes.
+// Resolve Engine.IO's declared ws dependency from its own package, rather than
+// relying on a global WebSocket or an undeclared/hoisted client dependency.
+const testRequire = createRequire(__filename);
+const socketIoRequire = createRequire(testRequire.resolve('socket.io'));
+const engineIoRequire = createRequire(socketIoRequire.resolve('engine.io'));
+const WebSocketClient = engineIoRequire('ws') as typeof WebSocket;
 class TestSocket {
     readonly connected: Promise<'connected' | 'rejected'>;
     readonly disconnected: Promise<void>;
@@ -25,7 +31,7 @@ class TestSocket {
         let disconnected!: () => void;
         this.connected = new Promise(resolve => { connected = resolve; });
         this.disconnected = new Promise(resolve => { disconnected = resolve; });
-        this.socket = new WebSocket(url);
+        this.socket = new WebSocketClient(url);
         this.socket.addEventListener('message', event => {
             const packet = String(event.data);
             if (packet.startsWith('0')) this.socket.send('40' + JSON.stringify({ token: 'signed-happy-token' }));

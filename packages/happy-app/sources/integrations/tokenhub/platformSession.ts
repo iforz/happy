@@ -9,6 +9,50 @@ export interface PlatformSession {
     csrf: string;
 }
 const FLOW = 'tokenhub-platform-flow:v1:';
+const SIGN_OUT = 'tokenhub-platform-signout:v1:';
+export type PlatformSignOutIntent = Pick<PlatformSession, 'authority' | 'issuer' | 'subject' | 'sessionId' | 'expiresAt'> | { unknown: true };
+function signOutUrl(present: boolean) {
+    try {
+        const url = new URL(window.location.href);
+        if (present) url.searchParams.set('work_signed_out', '1'); else url.searchParams.delete('work_signed_out');
+        window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch { /* Storage may be unavailable; never put identity or secrets in the URL. */ }
+}
+export function rememberPlatformSignOut(session: PlatformSession | null): void {
+    const intent: PlatformSignOutIntent = session ? {
+        authority: session.authority, issuer: session.issuer, subject: session.subject,
+        sessionId: session.sessionId, expiresAt: session.expiresAt,
+    } : { unknown: true };
+    try {
+        const key = SIGN_OUT + serverUrl(), value = JSON.stringify(intent);
+        localStorage.setItem(key, value);
+        if (localStorage.getItem(key) !== value) throw new Error('Sign-out marker was not persisted');
+    } catch { /* The URL stop marker below also survives a storage failure. */ }
+    signOutUrl(true);
+}
+export function readPlatformSignOutIntent(): PlatformSignOutIntent | null {
+    let urlMarker = false;
+    try { urlMarker = new URL(window.location.href).searchParams.get('work_signed_out') === '1'; } catch { /* No URL marker. */ }
+    let saved: string | null;
+    try { saved = localStorage.getItem(SIGN_OUT + serverUrl()); } catch { return urlMarker ? { unknown: true } : null; }
+    if (saved === null) return urlMarker ? { unknown: true } : null;
+    try {
+        const value = JSON.parse(saved);
+        if (!value || typeof value.authority !== 'string' || typeof value.issuer !== 'string' || typeof value.subject !== 'string'
+            || typeof value.sessionId !== 'string' || !Number.isSafeInteger(value.expiresAt)) return { unknown: true };
+        // This is a stop marker, never an identity or authority to authenticate.
+        return { authority: value.authority, issuer: value.issuer, subject: value.subject, sessionId: value.sessionId, expiresAt: value.expiresAt };
+    } catch { return { unknown: true }; }
+}
+export function clearPlatformSignOutIntent(expected?: PlatformSignOutIntent | null, keepStop = false): void {
+    if (expected && JSON.stringify(readPlatformSignOutIntent()) !== JSON.stringify(expected)) return;
+    try { localStorage.removeItem(SIGN_OUT + serverUrl()); } catch { /* Explicit login can still use the URL marker. */ }
+    signOutUrl(keepStop);
+}
+export function matchesPlatformSignOut(intent: PlatformSignOutIntent, session: PlatformSession): boolean {
+    return !('unknown' in intent) && intent.authority === session.authority && intent.issuer === session.issuer
+        && intent.subject === session.subject && intent.sessionId === session.sessionId;
+}
 export function platformAccountScope(session: PlatformSession, server = getServerUrl()): string {
     return JSON.stringify(['tokenhub-platform-v1', server, session.authority, session.issuer, session.subject]);
 }
@@ -60,6 +104,7 @@ export async function beginPlatformLogin(): Promise<void> {
         || target.searchParams.get('code_challenge_method') !== 'S256') throw new Error('Work sign-in address is invalid.');
     // Only one-time navigation state, never an authentication token or encryption identity.
     sessionStorage.setItem(FLOW + server, JSON.stringify({ state: data.state, at: Date.now() }));
+    clearPlatformSignOutIntent();
     window.location.assign(target.toString());
 }
 export function hasPlatformLogin(url: string): boolean {

@@ -8,6 +8,7 @@ export function usePageConfig() {
     const server = getServerUrl();
     const [config, setConfig] = React.useState<HappyPageConfig>(defaultPageConfig);
     const [offline, setOffline] = React.useState(false);
+    const [revision, reload] = React.useReducer(value => value + 1, 0);
     React.useEffect(() => {
         let disposed = false, active: AbortController | undefined;
         const refresh = async () => {
@@ -24,6 +25,6 @@ export function usePageConfig() {
         void refresh();
         const subscription = AppState.addEventListener('change', state => { if (state === 'active') void refresh(); });
         return () => { disposed = true; active?.abort(); subscription.remove(); };
-    }, [server]);
-    return { config, offline };
+    }, [server, revision]);
+    return { config, offline, reload };
 }

@@ -7,6 +7,8 @@ import * as Notifications from 'expo-notifications';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter, usePathname, useGlobalSearchParams, Slot } from 'expo-router';
 import { PlatformSessionProvider, usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { hasPlatformLogin } from '@/integrations/tokenhub/platformSession';
+import { hasMatchingWebLogin } from '@/integrations/tokenhub/login';
 import { isPlatformRoute } from '@/integrations/tokenhub/platformRouting';
 import { AuthCredentials, TokenStorage } from '@/auth/tokenStorage';
 import { AuthProvider } from '@/auth/AuthContext';
@@ -258,7 +260,15 @@ function RootMode() {
     const pathname = usePathname();
     const { mode } = useGlobalSearchParams<{ mode?: string }>();
     // Only deliberate device routes initialize legacy credentials, sync and sockets.
-    const platformOnly = platform.status !== 'disabled' && isPlatformRoute(pathname, mode);
+    const callbackMode = React.useRef<boolean | null>(null);
+    if (pathname !== '/tokenhub/callback') callbackMode.current = null;
+    else if (callbackMode.current === null) callbackMode.current = isPlatformRoute(pathname, mode, {
+        platform: typeof window !== 'undefined' && hasPlatformLogin(window.location.href),
+        legacy: typeof window !== 'undefined' && hasMatchingWebLogin(window.location.href),
+    });
+    // Handlers consume the marker immediately. Keep its runtime until navigation
+    // leaves this callback instead of switching on a provider rerender.
+    const platformOnly = platform.status !== 'disabled' && (callbackMode.current ?? isPlatformRoute(pathname, mode));
     const initialRuntime = React.useRef(platformOnly);
     const switchingRuntime = platform.status !== 'disabled' && initialRuntime.current !== platformOnly;
     React.useEffect(() => {

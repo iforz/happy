@@ -6,7 +6,7 @@ import type { PlatformSession } from './platformSession';
 
 const f = vi.hoisted(() => ({ enabled: true, os: 'web', read: vi.fn(), complete: vi.fn(), logout: vi.fn(), mount: vi.fn(), unmount: vi.fn() }));
 vi.mock('react-native', () => ({ Platform: { get OS() { return f.os; } } }));
-vi.mock('./platformSession', () => ({ platformSessionEnabled: () => f.enabled, readPlatformSession: f.read, completePlatformLogin: f.complete, endPlatformSession: f.logout }));
+vi.mock('./platformSession', () => ({ platformSessionEnabled: () => f.enabled, readPlatformSession: f.read, completePlatformLogin: f.complete, endPlatformSession: f.logout, readPlatformSignOutIntent: () => null, rememberPlatformSignOut: () => {}, clearPlatformSignOutIntent: () => {}, matchesPlatformSignOut: () => false }));
 vi.mock('@/auth/tokenStorage', () => { throw new Error('Platform provider must not import Happy credentials'); });
 vi.mock('@/auth/AuthContext', () => { throw new Error('Platform provider must not initialize Happy auth'); });
 vi.mock('@/encryption/libsodium.lib', () => { throw new Error('Platform provider must not import Happy signing identity'); });
@@ -116,7 +116,9 @@ describe('cookie-backed platform session provider', () => {
     it('can recover only after pending explicit logout is confirmed', async () => {
         await render(); f.logout.mockRejectedValueOnce(new Error('503 synthetic outage'));
         await act(async () => { await expect(current.logout()).rejects.toThrow(); });
-        f.read.mockResolvedValueOnce(null); await focus(); expect(f.logout).toHaveBeenCalledTimes(2); expect(f.read).toHaveBeenCalledTimes(2); expect(current.status).toBe('ready'); expect(current.session).toBeNull();
+        await focus(); expect(f.logout).toHaveBeenCalledTimes(2);
+        // Confirming logout must not read and accidentally present a newer cookie.
+        expect(f.read).toHaveBeenCalledOnce(); expect(current.status).toBe('ready'); expect(current.session).toBeNull();
     });
     it('an older session response cannot restore the old account after a newer refresh', async () => {
         await render(); const old = deferred<PlatformSession>(); f.read.mockReturnValueOnce(old.promise); await focus();
