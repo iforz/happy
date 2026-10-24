@@ -2,7 +2,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { authcenterOrigin, AUTHCENTER_TIMEOUT_MS, type WorkClientContext } from './workAuthorization';
 
-export const PLATFORM_SESSION_COOKIE = '__Host-tokenhub-platform';
+export const PLATFORM_CHANNEL_COOKIE = '__Host-tokenhub-platform';
+export const PLATFORM_AUTH_COOKIE = '__Host-tokenhub-platform-auth';
 export const PLATFORM_CSRF_HEADER = 'x-tokenhub-csrf';
 const FLOW_LIFETIME_MS = 5 * 60_000;
 const MAX_SESSION_LIFETIME_MS = 24 * 60 * 60_000;
@@ -19,6 +20,8 @@ export interface PlatformRecord {
     principal: PlatformPrincipal;
     /** Server-only. Never put this record in a response, log or browser storage. */
     grant: string;
+    /** Hash of the independently rotated authentication cookie, never the channel. */
+    authHash: string;
     csrf: string;
     streams: Set<AbortController>;
 }
@@ -32,9 +35,9 @@ interface PlatformChannel {
     flow?: PlatformFlow;
 }
 
-/** A server-issued browser channel, not an authenticated identity. Only a verified
- * current flow can attach a principal. Keeping its cookie stable prevents delayed
- * login/logout responses from replacing a newer account's browser credentials. */
+/** A server-issued preauthentication channel. It coordinates login flows but never
+ * authenticates by itself: every attached principal also requires a separately
+ * rotated cookie. A copied old cookie pair cannot inherit a later login. */
 export class PlatformSessionStore {
     private channels = new Map<string, PlatformChannel>();
     private flows = new Map<string, PlatformFlow>();
@@ -93,12 +96,13 @@ export class PlatformSessionStore {
         this.flows.delete(flow.state);
         channel.flow = undefined;
     }
-    complete(flow: PlatformFlow, principal: PlatformPrincipal, grant: string): PlatformRecord {
+    complete(flow: PlatformFlow, principal: PlatformPrincipal, grant: string): { record: PlatformRecord; authToken: string } {
         if (!this.isCurrentFlow(flow)) throw new Error('Platform login was cancelled');
         const channel = this.channel(flow.binding)!;
+        const authToken = opaque();
         const record: PlatformRecord = {
             principal: { ...principal, expiresAt: Math.min(principal.expiresAt, channel.absoluteExpiresAt) },
-            grant, csrf: opaque(), streams: new Set<AbortController>(),
+            grant, authHash: createHash('sha256').update(authToken).digest('base64url'), csrf: opaque(), streams: new Set<AbortController>(),
         };
         if (record.principal.expiresAt <= this.now()) throw new Error('Platform login expired');
         // Synchronous replacement: no request can observe the old grant after commit.
@@ -106,7 +110,7 @@ export class PlatformSessionStore {
         channel.record = record;
         channel.expiresAt = channel.absoluteExpiresAt;
         this.cancelFlow(flow.binding, flow);
-        return record;
+        return { record, authToken };
     }
     get(id: string): PlatformRecord | undefined { this.prune(); return this.channel(id)?.record; }
     remove(id: string, expected?: PlatformRecord) {
@@ -121,6 +125,10 @@ export class PlatformSessionStore {
         this.channels.clear();
         this.flows.clear();
     }
+}
+
+export function matchesPlatformAuth(record: PlatformRecord, authToken: string): boolean {
+    return validOpaque(authToken) && equalOpaque(createHash('sha256').update(authToken).digest('base64url'), record.authHash);
 }
 
 /** Ambiguous duplicate cookies are rejected rather than selecting an attacker-controlled value. */

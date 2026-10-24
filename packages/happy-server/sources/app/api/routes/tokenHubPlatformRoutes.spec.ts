@@ -7,6 +7,7 @@ import { defaultPageConfig } from '@slopus/happy-wire';
 import type { Fastify } from '../types';
 import { enableAuthentication } from '../utils/enableAuthentication';
 import type { WorkAuthorization } from '@/app/tokenhub/workAuthorization';
+import { PlatformSessionStore } from '@/app/tokenhub/platformSession';
 import { tokenHubPlatformRoutes } from './tokenHubPlatformRoutes';
 
 const forbidden = vi.hoisted(() => ({
@@ -27,7 +28,8 @@ const gatewayOrigin = 'http://127.0.0.1:28080';
 const grant = 'synthetic-server-only-work-grant';
 const coreSid = 'verified-core-work-sid';
 const flowCookieName = '__Host-tokenhub-platform-flow';
-const sessionCookieName = '__Host-tokenhub-platform';
+const channelCookieName = '__Host-tokenhub-platform';
+const authCookieName = '__Host-tokenhub-platform-auth';
 const prefix = '/v1/tokenhub/platform';
 const key = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const otherKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -73,13 +75,27 @@ function cookie(response: ResponseLike, name: string) {
     if (!result) throw new Error(`Missing ${name} cookie: ${response.body}`);
     return result.split(';')[0];
 }
+function jarCookie(jar: string, name: string) {
+    return jar.split(';').map(value => value.trim()).find(value => value.startsWith(name + '=')) ?? '';
+}
+function mergeCookieJar(jar: string, response: ResponseLike) {
+    const values = new Map(jar.split(';').map(value => value.trim()).filter(Boolean).map(value => {
+        const index = value.indexOf('='); return [value.slice(0, index), value.slice(index + 1)];
+    }));
+    for (const header of setCookies(response)) {
+        const pair = header.split(';')[0], index = pair.indexOf('='), name = pair.slice(0, index), value = pair.slice(index + 1);
+        if (/Max-Age=0(?:;|$)/.test(header)) values.delete(name);
+        else values.set(name, value);
+    }
+    return [...values].map(([name, value]) => name + '=' + value).join('; ');
+}
 function json(value: unknown, status = 200) {
     return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 }
 function assertNoCredentials(response: ResponseLike) {
     expect(response.body).not.toContain(grant);
     for (const sid of [coreSid, 'newer-core-work-sid', 'winning-core-work-sid']) expect(response.body).not.toContain(sid);
-    for (const name of ['authorizationToken', 'authorization_token', 'id_token', 'publicKey', 'privateKey', 'code_verifier', 'signature', 'seed']) {
+    for (const name of ['authorizationToken', 'authorization_token', 'authToken', 'authHash', 'authSecret', 'id_token', 'publicKey', 'privateKey', 'code_verifier', 'signature', 'seed']) {
         expect(response.body).not.toContain(`"${name}"`);
     }
 }
@@ -198,23 +214,27 @@ function setup(options: Options = {}) {
         const response = await app.inject({ method: 'POST', url: prefix + '/start', headers: { ...browserHeaders, ...headers }, payload: {} });
         expect(response.statusCode, response.body).toBe(200);
         const data = response.json(); const url = new URL(data.authorizeUrl);
-        const channel = setCookies(response).some(value => value.startsWith(sessionCookieName + '='))
-            ? cookie(response, sessionCookieName)
-            : headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(sessionCookieName + '='));
+        const jar = mergeCookieJar(headers.cookie ?? '', response);
+        const channel = jarCookie(jar, channelCookieName);
         if (!channel) throw new Error('Start must issue or retain a server-known browser channel');
-        const flow: Flow = { state: data.state, nonce: url.searchParams.get('nonce')!, challenge: url.searchParams.get('code_challenge')!, cookie: channel, code: 'synthetic-code-' + flows.size, response };
+        const flow: Flow = { state: data.state, nonce: url.searchParams.get('nonce')!, challenge: url.searchParams.get('code_challenge')!, cookie: jar, code: 'synthetic-code-' + flows.size, response };
         flows.set(flow.code, flow); return flow;
     };
     const complete = async (flow: Flow, headers: Record<string, string> = {}) => {
         const response = await app.inject({ method: 'POST', url: prefix + '/complete', headers: { ...browserHeaders, cookie: flow.cookie, ...headers }, payload: { state: flow.state, code: flow.code } });
-        expect(response.headers['set-cookie']).toBeUndefined();
+        if (response.statusCode === 200) {
+            expect(setCookies(response)).toHaveLength(1);
+            expect(cookie(response, authCookieName)).toMatch(/^__Host-tokenhub-platform-auth=[A-Za-z0-9_-]{43}$/);
+            expect(response.body).not.toContain(cookie(response, authCookieName).split('=')[1]);
+        } else expect(response.headers['set-cookie']).toBeUndefined();
+        expect(setCookies(response).some(header => header.startsWith(channelCookieName + '='))).toBe(false);
         assertNoCredentials(response);
         return response;
     };
     const login = async (headers: Record<string, string> = {}) => {
         const flow = await start(headers); const response = await complete(flow);
         expect(response.statusCode, response.body).toBe(200);
-        return { flow, response, session: response.json(), cookie: flow.cookie };
+        return { flow, response, session: response.json(), cookie: mergeCookieJar(flow.cookie, response) };
     };
     return { app, calls, state, transport, legacyVerify, legacyHandler, pageConfig, start, complete, login, expiresAt, streamStarted, streamCancelled, exchangeStarted, releaseExchange: () => releaseExchangeResolve?.(), verifyStarted, releaseVerify: () => releaseVerifyResolve?.(), metadataStarted, releaseMetadata: () => releaseMetadataResolve?.(), advance: (ms: number) => { now += ms; } };
 }
@@ -239,7 +259,7 @@ describe('independent TokenHub platform login', () => {
         expect(f.calls.some(call => call.url.includes('attacker.test'))).toBe(false);
     });
 
-    it('sets only a bounded host-only secure HttpOnly Lax browser channel at start and never rewrites it on completion', async () => {
+    it('sets a bounded preauth channel at start and only a separate secure HttpOnly auth secret on successful completion', async () => {
         const f = setup(); const logged = await f.login();
         for (const response of [logged.flow.response, logged.response]) {
             for (const header of setCookies(response)) {
@@ -248,12 +268,15 @@ describe('independent TokenHub platform login', () => {
                 expect(header).not.toContain(flowCookieName);
             }
         }
-        expect(logged.response.headers['set-cookie']).toBeUndefined();
+        expect(setCookies(logged.response)).toHaveLength(1);
+        expect(cookie(logged.response, authCookieName)).toBe(jarCookie(logged.cookie, authCookieName));
         expect(setCookies(logged.flow.response)).toHaveLength(1);
-        const sessionHeader = setCookies(logged.flow.response).find(value => value.startsWith(sessionCookieName + '='))!;
-        expect(Number(sessionHeader.match(/Max-Age=(\d+)/)?.[1])).toBeGreaterThan(0);
-        expect(Number(sessionHeader.match(/Max-Age=(\d+)/)?.[1])).toBeLessThanOrEqual(24 * 60 * 60);
-        const opaque = logged.cookie.split('=')[1]; expect(opaque).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+        const channelHeader = setCookies(logged.flow.response).find(value => value.startsWith(channelCookieName + '='))!;
+        expect(Number(channelHeader.match(/Max-Age=(\d+)/)?.[1])).toBeGreaterThan(0);
+        expect(Number(channelHeader.match(/Max-Age=(\d+)/)?.[1])).toBeLessThanOrEqual(24 * 60 * 60);
+        const authHeader = setCookies(logged.response)[0]; expect(Number(authHeader.match(/Max-Age=(\d+)/)?.[1])).toBeLessThanOrEqual(60);
+        const opaque = jarCookie(logged.cookie, channelCookieName).split('=')[1]; expect(opaque).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+        const authSecret = jarCookie(logged.cookie, authCookieName).split('=')[1]; expect(authSecret).toMatch(/^[A-Za-z0-9_-]{43}$/); expect(authSecret).not.toBe(opaque); expect(authSecret).not.toBe(logged.session.csrf);
         expect(opaque).not.toBe(coreSid); expect(opaque).not.toBe(grant); expect(opaque).not.toBe(logged.session.csrf);
     });
 
@@ -270,7 +293,7 @@ describe('independent TokenHub platform login', () => {
     it('rejects missing/wrong state binding, rejects a foreign callback origin, and consumes successful state once', async () => {
         const f = setup(); const flow = await f.start(); const before = f.calls.length;
         const request = { method: 'POST' as const, url: prefix + '/complete', headers: { ...browserHeaders, cookie: flow.cookie }, payload: { state: flow.state, code: flow.code } };
-        for (const headers of [{ ...browserHeaders }, { ...browserHeaders, cookie: sessionCookieName + '=' + 'b'.repeat(43) }, { ...browserHeaders, origin: 'https://attacker.test', cookie: flow.cookie }]) {
+        for (const headers of [{ ...browserHeaders }, { ...browserHeaders, cookie: channelCookieName + '=' + 'b'.repeat(43) }, { ...browserHeaders, origin: 'https://attacker.test', cookie: flow.cookie }]) {
             const rejected = await f.app.inject({ ...request, headers }); expect([400, 403]).toContain(rejected.statusCode); expect(f.calls).toHaveLength(before);
         }
         const badState = await f.app.inject({ ...request, payload: { ...request.payload, state: 'x'.repeat(43) } }); expect(badState.statusCode).toBe(400);
@@ -306,7 +329,7 @@ describe('independent TokenHub platform login', () => {
     ])('fails closed on invalid assertions or metadata %j', async options => {
         const f = setup(options); const flow = await f.start(); const response = await f.complete(flow);
         expect([400, 401, 403, 503]).toContain(response.statusCode); assertNoCredentials(response);
-        expect(setCookies(response).some(value => value.startsWith(sessionCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
+        expect(setCookies(response).some(value => value.startsWith(channelCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
         expect(f.calls.filter(call => call.url.startsWith(gatewayOrigin))).toHaveLength(0);
     });
 
@@ -323,11 +346,61 @@ describe('independent TokenHub platform login', () => {
     ])('refuses a Core grant without valid active Work authority %j', async core => {
         const f = setup({ core }); const flow = await f.start(); const response = await f.complete(flow);
         expect([400, 401, 403]).toContain(response.statusCode); assertNoCredentials(response);
-        expect(setCookies(response).some(value => value.startsWith(sessionCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
+        expect(setCookies(response).some(value => value.startsWith(channelCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
     });
 });
 
 describe('platform session authorization and legacy isolation', () => {
+    it('never authenticates a later login when a separate client replays the entire pre-logout cookie jar', async () => {
+        const f = setup(); const first = await f.login(); const copiedJar = first.cookie;
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf }, payload: {} })).statusCode).toBe(200);
+        const second = await f.login({ cookie: first.cookie });
+        expect(jarCookie(second.cookie, channelCookieName)).toBe(jarCookie(copiedJar, channelCookieName));
+        expect(jarCookie(second.cookie, authCookieName)).not.toBe(jarCookie(copiedJar, authCookieName));
+        const beforeReplay = f.calls.length;
+        for (const endpoint of endpoints.filter(endpoint => !['/start', '/complete'].includes(endpoint.path))) {
+            const replay = await f.app.inject({ method: endpoint.method, url: prefix + endpoint.path, headers: { ...browserHeaders, cookie: copiedJar, 'x-tokenhub-csrf': second.session.csrf }, ...('payload' in endpoint ? { payload: endpoint.payload } : {}) });
+            expect(replay.statusCode, endpoint.path + ': ' + replay.body).toBe(401); expect(replay.body).not.toContain(second.session.csrf); expect(replay.body).not.toContain(second.session.sessionId);
+        }
+        expect(f.calls).toHaveLength(beforeReplay);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: second.cookie } })).statusCode).toBe(200);
+    });
+
+    it('requires the matching current auth secret and channel together before any live authorization call', async () => {
+        const f = setup(); const previous = await f.login(); const first = await f.login({ cookie: previous.cookie }); const second = await f.login();
+        const channelA = jarCookie(first.cookie, channelCookieName), authA = jarCookie(first.cookie, authCookieName);
+        const channelB = jarCookie(second.cookie, channelCookieName), authB = jarCookie(second.cookie, authCookieName);
+        const staleAuthA = jarCookie(previous.cookie, authCookieName);
+        const before = f.calls.length;
+        const invalidJars = [channelA, authA, channelA + '; ' + authB, channelB + '; ' + authA, channelA + '; ' + authCookieName + '=' + 'x'.repeat(43), channelA + '; ' + authA + '; ' + authA, channelA + '; ' + authA + '; ' + staleAuthA, channelA + '; ' + staleAuthA + '; ' + authA];
+        for (const jar of invalidJars) {
+            for (const path of ['/session', '/models', '/stream', '/logout']) {
+                const response = await f.app.inject({ method: ['/session', '/models'].includes(path) ? 'GET' : 'POST', url: prefix + path, headers: { ...browserHeaders, cookie: jar, 'x-tokenhub-csrf': first.session.csrf }, ...(['/session', '/models'].includes(path) ? {} : { payload: path === '/stream' ? { model: 'model-a', prompt: 'hello' } : {} }) });
+                expect(response.statusCode, path + ': ' + response.body).toBe(401); expect(response.body).not.toContain(first.session.csrf); expect(response.body).not.toContain(second.session.csrf);
+            }
+        }
+        expect(f.calls).toHaveLength(before);
+        for (const logged of [first, second]) {
+            const valid = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } }); expect(valid.statusCode).toBe(200); expect(valid.json()).toEqual(logged.session);
+        }
+    });
+
+    it('stores only a hash of the rotated auth secret in the server record and never exposes it in JSON or Core requests', async () => {
+        const completed = vi.spyOn(PlatformSessionStore.prototype, 'complete');
+        try {
+            const f = setup(); const logged = await f.login(); const authSecret = jarCookie(logged.cookie, authCookieName).split('=')[1];
+            const result = completed.mock.results[0].value as ReturnType<PlatformSessionStore['complete']>;
+            expect(result.record.authHash).toBe(createHash('sha256').update(authSecret).digest('base64url'));
+            expect(JSON.stringify(result.record)).not.toContain(authSecret); expect(result.record).not.toHaveProperty('authToken');
+            expect(authSecret).not.toBe(jarCookie(logged.cookie, channelCookieName).split('=')[1]); expect(authSecret).not.toBe(logged.session.csrf); expect(authSecret).not.toBe(logged.session.sessionId);
+            const response = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } }); expect(response.statusCode).toBe(200); assertNoCredentials(response); expect(response.body).not.toContain(authSecret); expect(response.body).not.toContain(result.record.authHash);
+            for (const call of f.calls) {
+                expect(String(call.init?.body)).not.toContain(authSecret);
+                new Headers(call.init?.headers).forEach(value => expect(value).not.toContain(authSecret));
+            }
+        } finally { completed.mockRestore(); }
+    });
+
     it.each([
         { TOKENHUB_PLATFORM_AUTH: undefined }, { TOKENHUB_PLATFORM_AUTH: 'false' }, { TOKENHUB_UNIFIED_AUTH: 'false' },
         { TOKENHUB_SSO_ENABLED: 'false' }, { TOKENHUB_GATEWAY_MODE: 'mock' }, { TOKENHUB_URL: 'http://accounts.example.test' },
@@ -416,7 +489,7 @@ describe('platform session authorization and legacy isolation', () => {
     it('cannot authorize legacy APIs with platform cookies or their opaque IDs and does not exempt future platform routes', async () => {
         const f = setup(); const logged = await f.login();
         for (const path of ['/v1/sessions', '/v1/account', '/v1/machines', prefix + '/future']) {
-            for (const authorization of [undefined, 'Bearer ' + logged.cookie.split('=')[1], 'Bearer ' + grant]) {
+            for (const authorization of [undefined, 'Bearer ' + jarCookie(logged.cookie, channelCookieName).split('=')[1], 'Bearer ' + jarCookie(logged.cookie, authCookieName).split('=')[1], 'Bearer ' + grant]) {
                 const response = await f.app.inject({ url: path, headers: { ...browserHeaders, cookie: logged.cookie, ...(authorization ? { authorization } : {}) } }); expect(response.statusCode).toBe(401);
             }
         }
@@ -433,7 +506,7 @@ describe('platform session authorization and legacy isolation', () => {
 
     it('rejects ambiguous duplicate platform cookies instead of selecting one', async () => {
         const f = setup(); const logged = await f.login(); const before = f.calls.length;
-        for (const cookies of [logged.cookie + '; ' + logged.cookie, logged.cookie + '; ' + sessionCookieName + '=' + 'z'.repeat(43)]) {
+        for (const cookies of [logged.cookie + '; ' + logged.cookie, logged.cookie + '; ' + channelCookieName + '=' + 'z'.repeat(43)]) {
             const response = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: cookies } }); expect(response.statusCode).toBe(401);
         }
         expect(f.calls).toHaveLength(before);
@@ -472,19 +545,14 @@ describe('platform session authorization and legacy isolation', () => {
         expect(delayedLogout.statusCode).toBe(200);
         const nextFlow = await f.start({ cookie: first.cookie });
         const newerLogin = await f.complete(nextFlow); expect(newerLogin.statusCode).toBe(200);
-        const newerCookie = nextFlow.cookie, newerSession = newerLogin.json(); expect(newerCookie).toBe(first.cookie);
-        const browserCookies = new Map([[sessionCookieName, newerCookie.split('=')[1]]]);
-        // Deliver A's already-generated logout response only after B's login cookie.
-        for (const header of setCookies(delayedLogout)) {
-            const [name, value] = header.split(';')[0].split('=');
-            if (/Max-Age=0(?:;|$)/.test(header)) browserCookies.delete(name);
-            else browserCookies.set(name, value);
-        }
+        const newerCookie = mergeCookieJar(nextFlow.cookie, newerLogin), newerSession = newerLogin.json(); expect(jarCookie(newerCookie, channelCookieName)).toBe(jarCookie(first.cookie, channelCookieName));
+        // Deliver A's already-generated logout response only after B's login cookies.
+        const currentCookie = mergeCookieJar(newerCookie, delayedLogout);
         expect(delayedLogout.headers['set-cookie']).toBeUndefined();
-        const currentCookie = [...browserCookies].map(([name, value]) => name + '=' + value).join('; '); expect(currentCookie).toBe(newerCookie);
+        expect(currentCookie).toBe(newerCookie);
         const session = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: currentCookie } }); expect(session.statusCode).toBe(200); expect(session.json()).toEqual(newerSession);
         const models = await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: currentCookie, 'x-tokenhub-csrf': newerSession.csrf } }); expect(models.statusCode).toBe(200);
-        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf } })).statusCode).toBe(403);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf } })).statusCode).toBe(401);
     });
 
     it('retains the browser channel but rotates public record ID and CSRF even when relogin has the same Core SID', async () => {
@@ -492,8 +560,10 @@ describe('platform session authorization and legacy isolation', () => {
         expect(replacement.cookie).toBe(first.cookie); expect(replacement.response.headers['set-cookie']).toBeUndefined();
         const response = await f.complete(replacement); expect(response.statusCode).toBe(200); expect(response.json().csrf).not.toBe(first.session.csrf);
         expect(response.json().sessionId).toMatch(/^[a-f0-9]{64}$/); expect(response.json().sessionId).not.toBe(first.session.sessionId); expect(response.json().sessionId).not.toBe(coreSid);
-        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: first.cookie, 'x-tokenhub-csrf': first.session.csrf } })).statusCode).toBe(403);
-        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(response.json());
+        const newerJar = mergeCookieJar(replacement.cookie, response); expect(jarCookie(newerJar, authCookieName)).not.toBe(jarCookie(first.cookie, authCookieName));
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } })).statusCode).toBe(401);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: newerJar, 'x-tokenhub-csrf': first.session.csrf } })).statusCode).toBe(403);
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newerJar } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(response.json());
     });
 
     it('does not resurrect a platform session when a pending login finishes after browser logout', async () => {
@@ -505,7 +575,7 @@ describe('platform session authorization and legacy isolation', () => {
         const logout = await f.app.inject({ method: 'POST', url: prefix + '/logout', headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': logged.session.csrf }, payload: {} });
         expect(logout.statusCode).toBe(200); f.releaseExchange(); const response = await pending;
         expect([400, 401]).toContain(response.statusCode);
-        expect(setCookies(response).some(value => value.startsWith(sessionCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
+        expect(setCookies(response).some(value => value.startsWith(channelCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
         expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } })).statusCode).toBe(401);
         expect(f.calls.some(call => call.url.endsWith('/revoke'))).toBe(false);
     });
@@ -515,43 +585,46 @@ describe('platform session authorization and legacy isolation', () => {
         const pending = f.complete(old).then(response => response); await f.exchangeStarted;
         const current = await f.start({ cookie: old.cookie }); f.releaseExchange(); const obsolete = await pending;
         expect([400, 401]).toContain(obsolete.statusCode);
-        expect(setCookies(obsolete).some(value => value.startsWith(sessionCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
+        expect(setCookies(obsolete).some(value => value.startsWith(channelCookieName + '=') && !value.includes('Max-Age=0'))).toBe(false);
         expect(setCookies(obsolete).some(value => value.startsWith(flowCookieName + '=') && value.includes('Max-Age=0'))).toBe(false);
         const good = await f.complete(current); expect(good.statusCode, good.body).toBe(200);
-        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: current.cookie } })).statusCode).toBe(200);
+        expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: mergeCookieJar(current.cookie, good) } })).statusCode).toBe(200);
     });
 
-    it('cannot replace a newer server principal when an earlier successful completion response arrives late', async () => {
+    it('fails closed rather than reviving an old principal when its delayed success auth cookie overwrites a newer login', async () => {
         const f = setup(); const first = await f.login(); const delayedSuccess = first.response;
         f.state.claims = { sub: '99' }; f.state.core = { subject: '99', session_id: 'newer-core-work-sid' };
-        const newer = await f.login({ cookie: first.cookie }); expect(newer.cookie).toBe(first.cookie); expect(newer.session.subject).toBe('99');
-        expect(newer.flow.response.headers['set-cookie']).toBeUndefined(); expect(delayedSuccess.headers['set-cookie']).toBeUndefined();
-        // The old success response has no cookie operation to apply to the stable channel.
-        let browserCookie = newer.cookie;
-        for (const header of setCookies(delayedSuccess)) if (header.startsWith(sessionCookieName + '=')) browserCookie = header.split(';')[0];
-        expect(browserCookie).toBe(newer.cookie);
-        const session = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: browserCookie } }); expect(session.statusCode).toBe(200); expect(session.json()).toEqual(newer.session);
+        const newer = await f.login({ cookie: first.cookie }); expect(jarCookie(newer.cookie, channelCookieName)).toBe(jarCookie(first.cookie, channelCookieName)); expect(newer.session.subject).toBe('99');
+        expect(newer.flow.response.headers['set-cookie']).toBeUndefined(); expect(setCookies(delayedSuccess)).toHaveLength(1);
+        const browserCookie = mergeCookieJar(newer.cookie, delayedSuccess); expect(browserCookie).not.toBe(newer.cookie);
+        const beforeLateCookie = f.calls.length;
+        for (const path of ['/session', '/models', '/stream', '/logout']) {
+            const rejected = await f.app.inject({ method: ['/session', '/models'].includes(path) ? 'GET' : 'POST', url: prefix + path, headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': newer.session.csrf }, ...(['/session', '/models'].includes(path) ? {} : { payload: path === '/stream' ? { model: 'model-a', prompt: 'hello' } : {} }) });
+            expect(rejected.statusCode).toBe(401); expect(rejected.body).not.toContain(newer.session.csrf); expect(rejected.body).not.toContain(newer.session.sessionId);
+        }
+        expect(f.calls).toHaveLength(beforeLateCookie);
+        const session = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } }); expect(session.statusCode).toBe(200); expect(session.json()).toEqual(newer.session);
         const beforeOldCsrf = f.calls.length;
         for (const path of ['/models', '/stream', '/logout']) {
-            const rejected = await f.app.inject({ method: path === '/models' ? 'GET' : 'POST', url: prefix + path, headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': first.session.csrf }, ...(path === '/models' ? {} : { payload: path === '/stream' ? { model: 'model-a', prompt: 'hello' } : {} }) });
+            const rejected = await f.app.inject({ method: path === '/models' ? 'GET' : 'POST', url: prefix + path, headers: { ...browserHeaders, cookie: newer.cookie, 'x-tokenhub-csrf': first.session.csrf }, ...(path === '/models' ? {} : { payload: path === '/stream' ? { model: 'model-a', prompt: 'hello' } : {} }) });
             expect(rejected.statusCode).toBe(403);
         }
         expect(f.calls).toHaveLength(beforeOldCsrf);
-        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: browserCookie, 'x-tokenhub-csrf': newer.session.csrf } })).statusCode).toBe(200);
+        expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: newer.cookie, 'x-tokenhub-csrf': newer.session.csrf } })).statusCode).toBe(200);
     });
 
     it.each([false, true])('a captured old-session authority response cannot revoke a newer principal on the same channel (revoked=%s)', async revoked => {
         const f = setup(); const first = await f.login(); f.state.core = { active: !revoked }; f.state.deferNextVerify = true;
         const pending = f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: first.cookie } }).then(response => response); await f.verifyStarted;
         f.state.claims = { sub: '99' }; f.state.core = { subject: '99', session_id: 'newer-core-work-sid' };
-        const newer = await f.login({ cookie: first.cookie }); expect(newer.cookie).toBe(first.cookie);
+        const newer = await f.login({ cookie: first.cookie }); expect(jarCookie(newer.cookie, channelCookieName)).toBe(jarCookie(first.cookie, channelCookieName));
         f.releaseVerify(); const obsolete = await pending; expect(obsolete.statusCode).toBe(401); expect(obsolete.headers['set-cookie']).toBeUndefined();
         const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(newer.session);
         expect((await f.app.inject({ url: prefix + '/models', headers: { ...browserHeaders, cookie: newer.cookie, 'x-tokenhub-csrf': newer.session.csrf } })).statusCode).toBe(200);
     });
 
     it('never adopts an arbitrary browser-supplied channel identifier', async () => {
-        const f = setup(); const arbitrary = sessionCookieName + '=' + 'x'.repeat(43);
+        const f = setup(); const arbitrary = channelCookieName + '=' + 'x'.repeat(43);
         expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: arbitrary } })).statusCode).toBe(401);
         const flow = await f.start({ cookie: arbitrary }); expect(flow.cookie).not.toBe(arbitrary); expect(setCookies(flow.response)).toHaveLength(1);
         const before = f.calls.length; expect((await f.complete(flow, { cookie: arbitrary })).statusCode).toBe(400); expect(f.calls).toHaveLength(before);
@@ -566,12 +639,12 @@ describe('platform session authorization and legacy isolation', () => {
         f.state.claims = { sub: '99' }; f.state.core = { subject: '99', session_id: 'winning-core-work-sid' };
         const winner = await f.complete(second); expect(winner.statusCode).toBe(200);
         // Deliver the older fresh-start response after the winning channel logged in.
-        const lateCookie = cookie(first.response, sessionCookieName); expect(lateCookie).toBe(first.cookie);
+        const lateCookie = cookie(first.response, channelCookieName); expect(lateCookie).toBe(first.cookie);
         expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: lateCookie } })).statusCode).toBe(401);
         const retry = await f.start({ cookie: lateCookie }); expect(retry.cookie).toBe(lateCookie); expect(retry.response.headers['set-cookie']).toBeUndefined();
         expect((await f.complete(first)).statusCode).toBe(400);
         const restored = await f.complete(retry); expect(restored.statusCode).toBe(200);
-        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: retry.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(restored.json());
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: mergeCookieJar(retry.cookie, restored) } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(restored.json());
     });
 
     it.each(['expired', 'restarted'])('rejects a stale %s channel and issues a new one only on an explicit start', async mode => {
@@ -589,7 +662,7 @@ describe('platform session authorization and legacy isolation', () => {
         f.releaseMetadata(); const slower = await pending; expect(slower.statusCode).toBe(503); expect(slower.headers['set-cookie']).toBeUndefined();
         expect((await f.complete(channel)).statusCode).toBe(400);
         const success = await f.complete(newest); expect(success.statusCode).toBe(200);
-        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newest.cookie } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(success.json());
+        const current = await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: mergeCookieJar(newest.cookie, success) } }); expect(current.statusCode).toBe(200); expect(current.json()).toEqual(success.json());
     });
 });
 
@@ -633,7 +706,7 @@ describe('bounded platform session memory', () => {
         const lifetime = 24 * 60 * 60_000; const before = Date.now();
         const f = setup({ core: { expires_at: Math.floor(before / 1000) + 3 * 24 * 60 * 60 } }); const logged = await f.login();
         expect(logged.session.expiresAt).toBeGreaterThanOrEqual(before + lifetime); expect(logged.session.expiresAt).toBeLessThanOrEqual(Date.now() + lifetime);
-        const header = setCookies(logged.flow.response).find(value => value.startsWith(sessionCookieName + '='))!;
+        const header = setCookies(logged.flow.response).find(value => value.startsWith(channelCookieName + '='))!;
         expect(Number(header.match(/Max-Age=(\d+)/)?.[1])).toBe(24 * 60 * 60);
         f.advance(lifetime - 1);
         expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: logged.cookie } })).statusCode).toBe(200);
@@ -661,7 +734,7 @@ describe('bounded platform session memory', () => {
     it('does not slide a channel absolute lifetime when the same browser signs in again', async () => {
         const f = setup({ core: { expires_at: Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60 } }); const first = await f.login();
         f.advance(23 * 60 * 60_000); const newer = await f.login({ cookie: first.cookie });
-        expect(newer.cookie).toBe(first.cookie); expect(newer.session.expiresAt).toBe(first.session.expiresAt); expect(newer.flow.response.headers['set-cookie']).toBeUndefined();
+        expect(jarCookie(newer.cookie, channelCookieName)).toBe(jarCookie(first.cookie, channelCookieName)); expect(newer.session.expiresAt).toBe(first.session.expiresAt); expect(newer.flow.response.headers['set-cookie']).toBeUndefined();
         f.advance(60 * 60_000 - 1); expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } })).statusCode).toBe(200);
         f.advance(1); expect((await f.app.inject({ url: prefix + '/session', headers: { ...browserHeaders, cookie: newer.cookie } })).statusCode).toBe(401);
         const fresh = await f.start({ cookie: newer.cookie }); expect(fresh.cookie).not.toBe(newer.cookie);

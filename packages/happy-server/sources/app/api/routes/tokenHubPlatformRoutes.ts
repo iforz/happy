@@ -10,8 +10,8 @@ import { loadPageConfig } from '@/app/tokenhub/pageConfig';
 import { trustedJson, trustedTokenHubOrigin, unwrap } from '@/app/tokenhub/trusted';
 import { WORK_REVALIDATE_MS } from '@/app/tokenhub/workAuthorization';
 import {
-    createPlatformAuthority, equalOpaque, platformCookie, PlatformAuthorityError, PlatformCapacityError, PlatformSessionStore,
-    PLATFORM_CSRF_HEADER, PLATFORM_SESSION_COOKIE, publicPlatformSession, readPlatformCookie,
+    createPlatformAuthority, equalOpaque, matchesPlatformAuth, platformCookie, PlatformAuthorityError, PlatformCapacityError, PlatformSessionStore,
+    PLATFORM_AUTH_COOKIE, PLATFORM_CSRF_HEADER, PLATFORM_CHANNEL_COOKIE, publicPlatformSession, readPlatformCookie,
     type PlatformFlow, type PlatformPrincipal, type PlatformRecord,
 } from '@/app/tokenhub/platformSession';
 
@@ -67,8 +67,9 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         return true;
     }
     function localSession(request: FastifyRequest, reply: FastifyReply, csrf: boolean): { id: string; record: PlatformRecord } | undefined {
-        const id = readPlatformCookie(request.headers.cookie, PLATFORM_SESSION_COOKIE), record = store.get(id);
-        if (!record) { fail(reply, 401, 'Platform sign-in required'); return; }
+        const id = readPlatformCookie(request.headers.cookie, PLATFORM_CHANNEL_COOKIE), record = store.get(id);
+        const authToken = readPlatformCookie(request.headers.cookie, PLATFORM_AUTH_COOKIE);
+        if (!record || !matchesPlatformAuth(record, authToken)) { fail(reply, 401, 'Platform sign-in required'); return; }
         if (csrf && !equalOpaque(request.headers[PLATFORM_CSRF_HEADER], record.csrf)) { fail(reply, 403, 'Platform session changed; reload before continuing'); return; }
         return { id, record };
     }
@@ -102,7 +103,7 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         try {
             // Allocate the generation before awaits so a slower old start cannot
             // supersede a newer start for the same browser channel.
-            pending = store.start(readPlatformCookie(request.headers.cookie, PLATFORM_SESSION_COOKIE));
+            pending = store.start(readPlatformCookie(request.headers.cookie, PLATFORM_CHANNEL_COOKIE));
             const [page] = await Promise.all([config(transport, true), metadataForLogin()]);
             if (!page.showLogin || !page.ssoReady) throw new Error('Platform login is unavailable');
             const url = new URL(page.loginUrl);
@@ -111,9 +112,9 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
             if (!store.isCurrentFlow(flow)) throw new Error('Platform login was superseded');
             url.search = new URLSearchParams({ client_id: 'happy-web', redirect_uri: self + '/tokenhub/callback', state: flow.state, nonce: flow.nonce,
                 code_challenge: createHash('sha256').update(flow.verifier).digest('base64url'), code_challenge_method: 'S256' }).toString();
-            // Only a fresh anonymous channel writes a cookie. Completion and logout
-            // never do, so a delayed successful callback cannot switch accounts.
-            if (pending.created) reply.header('Set-Cookie', platformCookie(PLATFORM_SESSION_COOKIE, pending.id, (pending.expiresAt - now()) / 1000));
+            // A channel only coordinates flows. Authentication requires the distinct
+            // per-login cookie issued after verified completion.
+            if (pending.created) reply.header('Set-Cookie', platformCookie(PLATFORM_CHANNEL_COOKIE, pending.id, (pending.expiresAt - now()) / 1000));
             return { authorizeUrl: url.toString(), state: flow.state, tokenHubOrigin: authority };
         } catch {
             if (pending) store.cancelFlow(pending.id, pending.flow);
@@ -124,7 +125,7 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         if (!available(reply) || !sameOrigin(request, reply, true)) return;
         let activeFlow: PlatformFlow | undefined;
         try {
-            const flow = store.consume(request.body.state, readPlatformCookie(request.headers.cookie, PLATFORM_SESSION_COOKIE));
+            const flow = store.consume(request.body.state, readPlatformCookie(request.headers.cookie, PLATFORM_CHANNEL_COOKIE));
             activeFlow = flow;
             if (request.body.error) return fail(reply, 400, 'Platform login cancelled');
             const [metadata, jwks] = await Promise.all([metadataForLogin(), trustedJson(authority, '/api/v1/auth/sso/jwks', {}, transport)]);
@@ -137,11 +138,15 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
             if (typeof result.id_token !== 'string' || typeof result.authorization_token !== 'string') throw new Error('Invalid login response');
             const identity = verifyIdentity(result.id_token, jwks, metadata.issuer, flow.nonce, now(), 'happy-web');
             const principal = await verifier!.verify(result.authorization_token, authority, identity.subject, context(request));
-            const record = store.complete(flow, principal, result.authorization_token);
+            const { record, authToken } = store.complete(flow, principal, result.authorization_token);
+            // Rotate the real bearer independently of the stable preauth channel.
+            // A delayed obsolete response may force a retry, but its old auth cookie
+            // cannot match the newer record or restore an earlier principal.
+            reply.header('Set-Cookie', platformCookie(PLATFORM_AUTH_COOKIE, authToken, (record.principal.expiresAt - now()) / 1000));
             return publicPlatformSession(record);
         } catch (error) {
-            // No callback writes cookies, even errors, and only its own generation
-            // can be cancelled. Stale responses cannot disturb a newer login.
+            // Failed callbacks never write cookies, and only their own generation
+            // can be cancelled. Neither can delete a newer authentication record.
             if (!activeFlow) return fail(reply, 400, 'Invalid or expired platform login');
             return fail(reply, error instanceof PlatformAuthorityError ? error.status : error instanceof PlatformCapacityError ? 503 : 400, 'Platform login could not be verified');
         } finally { if (activeFlow) store.cancelFlow(activeFlow.binding, activeFlow); }

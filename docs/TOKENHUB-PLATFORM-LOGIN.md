@@ -25,21 +25,35 @@ User-Agent, since Core Work grants are bound to that request context.
 
 ## Security and lifecycle
 
-The server alone retains the Core grant. The browser receives only a server-minted,
-256-bit opaque `__Host-` cookie (HttpOnly, Secure, SameSite=Lax, no Domain) and a CSRF
-value. The cookie identifies a browser channel, not an authenticated principal.
-Only `/start` can mint it, and only when no unexpired server-issued channel exists.
-Each channel has one current state/nonce/PKCE flow. Verified completion replaces its
-principal and grant atomically, rotates CSRF, and aborts the previous principal's
-requests. Completion, including errors, never writes cookies, so a delayed success
-cannot replace a newer login. Unknown client-chosen IDs are never adopted.
+The server alone retains the Core grant. The browser receives two independent,
+server-minted 256-bit opaque `__Host-` cookies (HttpOnly, Secure, SameSite=Lax, no
+Domain), plus a CSRF value. The stable `__Host-tokenhub-platform` cookie is only a
+preauthentication channel for coordinating state/nonce/PKCE flows. Only `/start`
+can mint it, and unknown client-chosen IDs are never adopted. It cannot authenticate
+any request by itself, including `/session`.
+
+Each verified completion atomically replaces the principal and grant, rotates
+CSRF and the separate `__Host-tokenhub-platform-auth` authentication cookie, and
+aborts the previous principal's requests. Only a hash of that authentication cookie
+is retained server-side. Every authenticated route requires both the channel and
+the matching current authentication cookie. A copied cookie pair from before
+logout or relogin cannot read a newer principal or its CSRF, even when the Core
+account, SID, IP and User-Agent are unchanged. Mixing credentials from different
+channels also fails before any Core request.
+
+Successful completion writes only its new authentication cookie, never the channel
+cookie. A delayed older success can overwrite the browser's current authentication
+cookie, but the stale value cannot match the newer server record: requests return
+401 and require a fresh login instead of restoring or switching accounts. Failed
+callbacks and logout never write cookies. This fail-closed retry is intentional.
 The public `sessionId` is a non-credential identifier for this particular BFF login,
 not the Core SID. It changes even when the same Core account/session signs in again,
 so a saved sign-out intent cannot target the newer login. The Core SID remains
 server-side for live authority verification.
 
-Every catalog/stream request binds its CSRF value to the current channel principal,
-then revalidates Core authority. Writes also require the exact configured Origin.
+Every catalog/stream request additionally binds its CSRF value to the current
+channel principal, then revalidates Core authority. Writes also require the exact
+configured Origin.
 A stale tab's CSRF is rejected before a catalog or model request. Platform sessions
 cannot authenticate Happy account, file, device or socket routes.
 
@@ -55,9 +69,11 @@ login, but cannot link or restore the other channel's authenticated principal.
 “Sign out of Work” immediately deletes the server-side principal/grant, cancels its
 pending login flow, and aborts active requests. It does not revoke the Core refresh
 family or sign out other applications. Logout never writes cookies, so a delayed
-response cannot erase a newer login. The remaining channel has no authority and
-expires within five minutes unless a new explicit login starts; its cookie is
-reused only through a fresh verified flow. No cookie-byte deletion is claimed.
+response cannot erase a newer login. The old authentication cookie is revoked
+server-side and never becomes valid again. The remaining preauthentication channel
+has no authority and expires within five minutes unless a new explicit login
+starts; that flow must issue a fresh authentication cookie. No cookie-byte deletion
+is claimed.
 A failed logout retains only public session-instance metadata for a safe retry;
 it never persists CSRF or grants. The signed-out page also retains a non-sensitive
 URL stop marker until explicit login, so reload/foreground cannot silently restore
