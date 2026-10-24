@@ -1,0 +1,96 @@
+name: Work web build check
+
+on:
+  pull_request:
+    paths:
+      - 'packages/happy-app/**'
+      - 'packages/happy-wire/**'
+      - 'scripts/**'
+      - 'patches/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - '.github/workflows/work-web-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: work-web-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  web-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: '1'
+      EXPO_NO_DOTENV: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_OFFLINE: '1'
+    steps:
+      - name: Checkout the exact PR merge candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install the repository's pinned pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install frozen workspace dependencies and existing patches
+        run: pnpm install --frozen-lockfile
+      - name: Verify the focused Work integration contracts
+        run: |
+          pnpm --filter happy-app exec vitest run --config vitest.tokenhub.config.ts \
+            sources/integrations/tokenhub/TokenHubConversation.test.ts \
+            sources/integrations/tokenhub/conversation.test.ts \
+            sources/integrations/tokenhub/newSessionRoute.test.ts \
+            sources/integrations/tokenhub/workMockClient.test.ts \
+            sources/integrations/tokenhub/workText.test.ts \
+            sources/integrations/tokenhub/sessionSource.test.ts
+      - name: Verify the existing local/production build configuration
+        run: pnpm test:web-local
+      - name: Export the self-hosted production web app without publishing
+        # This existing script scrubs ambient keys, disables analytics/OTA,
+        # and runs local Expo export. It is not a self-hosted runner or deploy.
+        # No origin/base-path override: use reviewed repository defaults.
+        run: pnpm web:build:selfhost
+      - name: Verify output and record exact source provenance
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test -s packages/happy-app/dist/index.html
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const root = 'packages/happy-app/dist';
+          function files(directory) {
+            return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry =>
+              entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+          }
+          if (!files(root).some(file => file.endsWith('.js'))) throw new Error('Missing exported JavaScript bundle');
+          fs.writeFileSync(path.join(root, 'build-provenance.json'), JSON.stringify({
+            repository: process.env.GITHUB_REPOSITORY,
+            checkout_sha: process.env.GITHUB_SHA,
+            source_head_sha: process.env.PR_HEAD_SHA,
+            run_id: process.env.GITHUB_RUN_ID,
+            run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+            build_script: 'pnpm web:build:selfhost',
+            deployment_configuration: 'repository production-config.mjs defaults, not a verified live target',
+            release_ready: false,
+          }, null, 2) + '\n');
+          JS
+          (cd packages/happy-app/dist && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Retain the web build for review only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: work-web-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: packages/happy-app/dist
+          if-no-files-found: error
+          retention-days: 7
