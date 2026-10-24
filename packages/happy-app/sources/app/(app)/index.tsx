@@ -1,5 +1,4 @@
-import { getServerUrl } from '@/sync/serverConfig';
-import { accountScope, TokenHubConversation } from '@/integrations/tokenhub/TokenHubConversation';
+import { TokenHubHomeConversation } from '@/integrations/tokenhub/TokenHubConversation';
 import { isTokenHubSessionForUI } from '@/integrations/tokenhub/sessionSource';
 import { TokenHubWelcome } from "@/integrations/tokenhub/TokenHubWelcome";
 import { useAuth } from "@/auth/AuthContext";
@@ -21,7 +20,7 @@ export default function Home() {
     if (!auth.isAuthenticated) {
         return <NotAuthenticated />;
     }
-    if (auth.credentials && isTokenHubSessionForUI(auth.credentials.token)) return <TokenHubConversation key={accountScope(getServerUrl(),auth.credentials.token)} />;
+    if (auth.credentials && isTokenHubSessionForUI(auth.credentials.token)) return <TokenHubHomeConversation />;
     return (
         <Authenticated />
     )

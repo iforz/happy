@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import React from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -103,7 +104,7 @@ const WorkspaceSection = React.memo(({ project, workspace, selectedSessionId }: 
         // Nothing is listening in the sidebar layout or on web, where the dock
         // is never mounted; those fall back to the standalone screen.
         if (!requestHomeDockFocus()) {
-            router.navigate('/new');
+            router.navigate(DEVICE_SESSION_ROUTE);
         }
     }, [firstSession, router]);
 
