@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import * as React from 'react';
 import {
     View,
@@ -211,7 +212,7 @@ const HeaderRight = React.memo(({ activeTab }: { activeTab: ActiveTabType }) => 
         return (
             <View style={styles.headerActions}>
                 <Pressable
-                    onPress={() => router.navigate('/new')}
+                    onPress={() => router.navigate(DEVICE_SESSION_ROUTE)}
                     hitSlop={15}
                     style={styles.headerButton}
                 >

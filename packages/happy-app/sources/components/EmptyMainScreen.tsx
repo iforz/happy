@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
 import React from 'react';
 import { View, Text, Platform, Pressable, Linking, ScrollView } from 'react-native';
@@ -193,7 +194,7 @@ export function EmptyMainScreen({
                 <Ionicons name="terminal-outline" size={56} color={theme.colors.textSecondary} style={styles.stateIcon} />
                 <Text style={styles.stateTitle}>No sessions yet</Text>
                 <Text style={styles.stateDescription}>Start one on a connected machine.</Text>
-                <RoundButton title="Start New Session" size="large" onPress={() => router.navigate('/new')} />
+                <RoundButton title="Start New Session" size="large" onPress={() => router.navigate(DEVICE_SESSION_ROUTE)} />
                 {showArchivedAction}
             </View>
         );

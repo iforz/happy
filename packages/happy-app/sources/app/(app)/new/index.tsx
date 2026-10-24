@@ -1,4 +1,5 @@
 import React from 'react';
+import { NewSessionEntry } from '@/integrations/tokenhub/NewSessionEntry';
 import {
     View,
     Text,
@@ -3245,4 +3246,8 @@ const pickerStyles = {
     } as const,
 };
 
-export default React.memo(NewSessionScreen);
+function NewSessionRoute() {
+    return <NewSessionEntry><NewSessionScreen /></NewSessionEntry>;
+}
+
+export default React.memo(NewSessionRoute);

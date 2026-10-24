@@ -35,7 +35,7 @@ function failure(error: unknown): string {
 }
 
 /** The normal TokenHub conversation surface. Machine RPC is deliberately not used. */
-export function TokenHubConversation() {
+export function TokenHubConversation({ startNew = false }: { startNew?: boolean } = {}) {
     const auth = useAuth(), router = useRouter(), {theme} = useUnistyles();
     const token = auth.credentials?.token || '', secret = auth.credentials?.secret || '', server = getServerUrl();
     const scope = accountScope(server, token);
@@ -69,19 +69,19 @@ export function TokenHubConversation() {
         } catch { setStorageError(t('savedError')); }
         const interrupted=restored.some(item=>item.turns.some(turn=>turn.status==='streaming'));
         restored=restored.map(item=>({...item,turns:item.turns.map(turn=>turn.status==='streaming'?{...turn,status:'failed' as const}:turn)}));
-        visibleHistory.current=restored;setConversations(restored);setSelected(restored[0]?.id || '');
+        visibleHistory.current=restored;setConversations(restored);setSelected(startNew ? '' : restored[0]?.id || '');
         if(interrupted){setBlocked(true);setError(t('reconciliation'));}
         void client.getCatalog(controller.signal).then(value=>{
             requireRealCatalog(value);
             if(epoch!==generation.current)return;
-            setCatalog(value);setModel(restored[0]?.model || value.models[0]?.id || '');
+            setCatalog(value);setModel((startNew ? '' : restored[0]?.model) || value.models[0]?.id || '');
         }).catch(()=>{if(epoch===generation.current&&!controller.signal.aborted){setCatalog(null);setModel('');setError(t('catalogError'));}})
           .finally(()=>{if(epoch===generation.current)setLoading(false);});
         return ()=>{
             try { storage.set(scope,encodeBase64(encryptSecretBox(visibleHistory.current,decodeBase64(secret,'base64url')),'base64')); } catch {}
             generation.current++;controller.abort();active.current?.abort();active.current=null;
         };
-    },[client,scope,secret]);
+    },[client,scope,secret,startNew]);
     function update(id:string, turn:Turn) {
         const next=visibleHistory.current.map(item=>item.id===id?{...item,turns:[...item.turns.slice(0,-1),turn]}:item);visibleHistory.current=next;setConversations(next);
     }

@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,7 +67,7 @@ export function EmptySessionsTablet() {
     const troubleshoot = useOfflineMachineTroubleshooting();
     
     const handleStartNewSession = () => {
-        router.navigate('/new');
+        router.navigate(DEVICE_SESSION_ROUTE);
     };
     
     return (
