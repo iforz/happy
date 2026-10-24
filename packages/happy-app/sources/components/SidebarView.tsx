@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import { useAuth } from '@/auth/AuthContext';
 import { isTokenHubSessionForUI } from '@/integrations/tokenhub/sessionSource';
 import { usePathname } from 'expo-router';
@@ -103,7 +104,7 @@ export const SidebarView = React.memo(() => {
     const { visible: shortcutHintsVisible } = useShortcutHints();
 
     const handleNewSession = React.useCallback(() => {
-        router.navigate('/new');
+        router.navigate(DEVICE_SESSION_ROUTE);
     }, [router]);
     const handleArchiveVisibility = React.useCallback(() => {
         setHideArchivedSessions(!hideArchivedSessions);

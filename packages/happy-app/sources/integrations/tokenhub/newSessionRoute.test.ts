@@ -10,7 +10,7 @@ it('wraps the actual /new route in the account-aware entry', () => {
 });
 it('device-agent navigation remains explicit rather than falling into account chat', () => {
     expect(DEVICE_SESSION_ROUTE).toEqual({ pathname: '/new', params: { mode: 'device' } });
-    for (const component of ['MainView', 'EmptyMainScreen', 'EmptySessionsTablet']) {
+    for (const component of ['MainView', 'EmptyMainScreen', 'EmptySessionsTablet', 'SidebarView', 'ActiveSessionsGroupCompact', 'ProjectGroup', 'ProjectHomeList', 'HomeHeader']) {
         const text = source('../../components/' + component + '.tsx');
         expect(text).toContain('router.navigate(DEVICE_SESSION_ROUTE)');
         expect(text).not.toContain("router.navigate('/new')");
@@ -23,4 +23,9 @@ it('removes the obsolete footer render and every translated copy', () => {
     for (const name of readdirSync(directory).filter(name => name.endsWith('.ts'))) {
         expect(source('../../text/translations/' + name)).not.toContain('aboutFooter:');
     }
+});
+
+it('Home owns account conversations and the global new-chat shortcut uses the account-aware entry', () => {
+    expect(source('../../app/(app)/index.tsx')).toContain('return <TokenHubHomeConversation />');
+    expect(source('../../components/CommandPalette/CommandPaletteProvider.tsx')).toContain("router.navigate('/new')");
 });

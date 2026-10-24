@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import React from 'react';
 import { View, Pressable, Platform } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -85,7 +86,7 @@ const SectionHeader = React.memo(({ session, displayPath }: { session: SessionRo
         draft.setPath(pathToSet);
         draft.setSessionType(isWorktree ? 'worktree' : 'simple');
         draft.setWorktreeKey(isWorktree ? sessionPath : null);
-        router.navigate('/new');
+        router.navigate(DEVICE_SESSION_ROUTE);
     }, [session.machineId, session.homeDir, repoPath, isWorktree, sessionPath, draft, router]);
 
     const [isHovered, setIsHovered] = React.useState(false);

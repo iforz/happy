@@ -2,11 +2,11 @@ import * as React from 'react';
 // @ts-expect-error upstream does not install renderer types
 import {act,create} from 'react-test-renderer';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
-const f=vi.hoisted(()=>({credentials:{token:'head.eyJzdWIiOiJmaXh0dXJlIiwiaXNzIjoiaGFuZHkifQ.sig',secret:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'},server:'https://work.example',draft:'',id:0,storage:new Map<string,string>(),language:'en',mode:undefined as string|undefined,tokenHub:true,isAuthenticated:true}));
+const f=vi.hoisted(()=>({credentials:{token:'head.eyJzdWIiOiJmaXh0dXJlIiwiaXNzIjoiaGFuZHkifQ.sig',secret:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'},server:'https://work.example',draft:'',id:0,storage:new Map<string,string>(),language:'en',mode:undefined as string|undefined,newChat:undefined as string|undefined,dismissTo:vi.fn(),tokenHub:true,isAuthenticated:true}));
 vi.mock('react-native',()=>({View:'View',Text:'Text',Pressable:'Pressable',ScrollView:'ScrollView'}));
 vi.mock('react-native-unistyles',()=>({useUnistyles:()=>({theme:{colors:{text:'black',textSecondary:'gray',groupped:{background:'white'}}}})}));
 vi.mock('react-native-mmkv',()=>({MMKV:class{getString(k:string){return f.storage.get(k)}set(k:string,v:string){f.storage.set(k,v)}}}));
-vi.mock('expo-router',()=>({useRouter:()=>({push:vi.fn()}),useLocalSearchParams:()=>({mode:f.mode}),Redirect:'Redirect'}));
+vi.mock('expo-router',async()=>{const R=await import('react');return {useRouter:()=>({push:vi.fn(),dismissTo:f.dismissTo}),useLocalSearchParams:()=>({mode:f.mode,newChat:f.newChat}),useFocusEffect:(callback:()=>void)=>R.useEffect(callback,[callback]),Redirect:'Redirect'}});
 vi.mock('expo-crypto',()=>({randomUUID:()=>`00000000-0000-4000-8000-${String(++f.id).padStart(12,'0')}`}));
 vi.mock('@/auth/AuthContext',()=>({useAuth:()=>({credentials:f.credentials,isAuthenticated:f.isAuthenticated})}));
 vi.mock('@/sync/serverConfig',()=>({getServerUrl:()=>f.server}));
@@ -14,7 +14,7 @@ vi.mock('@/text',()=>({getCurrentLanguage:()=>f.language}));
 vi.mock('@/encryption/libsodium',()=>({encryptSecretBox:(x:any)=>new TextEncoder().encode(JSON.stringify(x)),decryptSecretBox:(x:Uint8Array)=>JSON.parse(new TextDecoder().decode(x))}));
 vi.mock('@/components/AgentInput',async()=>{const R=await import('react');return {AgentInput:R.forwardRef((props:any,ref:any)=>{R.useImperativeHandle(ref,()=>({getText:()=>f.draft,setTextAndSelection:(text:string)=>{f.draft=text}}));return R.createElement('AgentInput',props)})}});
 vi.mock('./sessionSource',()=>({isTokenHubSessionForUI:()=>f.tokenHub}));
-import {TokenHubConversation} from './TokenHubConversation';
+import {TokenHubConversation,TokenHubHomeConversation} from './TokenHubConversation';
 import {NewSessionEntry} from './NewSessionEntry';
 let renderer:ReturnType<typeof create>,fetcher:ReturnType<typeof vi.fn>;
 const models=[{id:'qwen-current',name:'Qwen'},{id:'claude-authorized',name:'Claude'},{id:'default',name:'Default model'}];
@@ -23,7 +23,7 @@ function completion(init:RequestInit){const input=JSON.parse(init.body as string
 async function render(){await act(async()=>{renderer=create(React.createElement(TokenHubConversation))})}
 const composer=()=>renderer.root.findByType('AgentInput');
 async function send(text:string){f.draft=text;await act(async()=>{composer().props.onChangeText(text)});await act(async()=>{composer().props.onSend();await new Promise(resolve=>setTimeout(resolve,0))})}
-beforeEach(()=>{f.storage.clear();f.mode=undefined;f.tokenHub=true;f.isAuthenticated=true;f.id=0;f.draft='';f.server='https://work.example';f.language='en';f.credentials={token:'head.eyJzdWIiOiJmaXh0dXJlIiwiaXNzIjoiaGFuZHkifQ.sig',secret:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'};vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);fetcher=vi.fn(async(url:string,init:RequestInit)=>url.endsWith('/models')?catalog():completion(init));vi.stubGlobal('fetch',fetcher)});
+beforeEach(()=>{f.storage.clear();f.mode=undefined;f.newChat=undefined;f.dismissTo.mockClear();f.tokenHub=true;f.isAuthenticated=true;f.id=0;f.draft='';f.server='https://work.example';f.language='en';f.credentials={token:'head.eyJzdWIiOiJmaXh0dXJlIiwiaXNzIjoiaGFuZHkifQ.sig',secret:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'};vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);fetcher=vi.fn(async(url:string,init:RequestInit)=>url.endsWith('/models')?catalog():completion(init));vi.stubGlobal('fetch',fetcher)});
 afterEach(async()=>{if(renderer)await act(async()=>renderer.unmount());vi.unstubAllGlobals()});
 it('normal composer offers exactly the real authorized catalog without a synthetic default',async()=>{await render();expect(composer().props.availableModels.map((x:any)=>x.key)).toEqual(['qwen-current','claude-authorized']);expect(composer().props.modelMode.key).toBe('qwen-current')});
 it('normal sends carry the chosen model, exact complete history, unique IDs and only the Work auth token',async()=>{await render();await send('first');await send('follow up');const calls=fetcher.mock.calls.filter(([url])=>url.endsWith('/stream'));expect(calls).toHaveLength(2);const first=JSON.parse(calls[0][1].body as string),second=JSON.parse(calls[1][1].body as string);expect(second.model).toBe('qwen-current');expect(second.messages).toEqual([{role:'user',content:'first'},{role:'assistant',content:'answer'},{role:'user',content:'follow up'}]);expect(second.requestId).not.toBe(first.requestId);expect(JSON.stringify(calls)).not.toContain(f.credentials.secret)});
@@ -35,6 +35,12 @@ it('visible catalog controls select the exact model used by the normal composer'
 
 async function renderNewEntry() {
     await act(async()=>{renderer=create(React.createElement(NewSessionEntry, null, React.createElement('LegacyDeviceComposer')))});
+    const destination=f.dismissTo.mock.calls.at(-1)?.[0];
+    if(destination){
+        expect(destination.pathname).toBe('/');
+        f.newChat=destination.params.newChat;
+        await act(async()=>renderer.update(React.createElement(TokenHubHomeConversation)));
+    }
 }
 it('/new uses the existing TokenHub gateway rather than the legacy CLI model picker',async()=>{
     fetcher.mockImplementation(async(url:string,init:RequestInit)=>url.endsWith('/models')

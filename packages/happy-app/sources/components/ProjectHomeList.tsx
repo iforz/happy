@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import * as React from 'react';
 import {
     FlatList,
@@ -455,7 +456,7 @@ const ProjectRow = React.memo(({ project }: {
         draft.setSessionType('worktree');
         draft.setWorktreeKey(null);
 
-        if (!requestHomeDockFocus()) router.navigate('/new');
+        if (!requestHomeDockFocus()) router.navigate(DEVICE_SESSION_ROUTE);
     }, [router, place?.machineId, place?.projectId, place?.path]);
 
     const canCreateWorkspace = !!place;

@@ -51,6 +51,7 @@ jobs:
             sources/integrations/tokenhub/TokenHubConversation.test.ts \
             sources/integrations/tokenhub/conversation.test.ts \
             sources/integrations/tokenhub/newSessionRoute.test.ts \
+            sources/integrations/tokenhub/newSessionLifecycle.test.ts \
             sources/integrations/tokenhub/workMockClient.test.ts \
             sources/integrations/tokenhub/workText.test.ts \
             sources/integrations/tokenhub/sessionSource.test.ts

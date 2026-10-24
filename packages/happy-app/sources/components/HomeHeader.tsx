@@ -1,3 +1,4 @@
+import { DEVICE_SESSION_ROUTE } from '@/integrations/tokenhub/newSessionRoute';
 import { HeaderLogo } from './HeaderLogo';
 import * as React from 'react';
 import { Header } from './navigation/Header';
@@ -89,7 +90,7 @@ function HeaderRight() {
 
     return (
         <Pressable
-            onPress={() => router.navigate('/new')}
+            onPress={() => router.navigate(DEVICE_SESSION_ROUTE)}
             hitSlop={15}
             style={[
                 styles.headerButton,

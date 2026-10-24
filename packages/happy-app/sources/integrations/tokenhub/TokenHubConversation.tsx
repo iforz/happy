@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import { MMKV } from 'react-native-mmkv';
 import { useUnistyles } from 'react-native-unistyles';
@@ -34,6 +34,15 @@ function failure(error: unknown): string {
     return t('requestError');
 }
 
+/** A new-chat intent resets the one Home owner, never a second stacked writer. */
+export function TokenHubHomeConversation() {
+    const auth = useAuth();
+    const { newChat } = useLocalSearchParams<{ newChat?: string }>();
+    const intent = typeof newChat === 'string' ? newChat : '';
+    const scope = accountScope(getServerUrl(), auth.credentials?.token || '');
+    return <TokenHubConversation key={JSON.stringify([scope, intent])} startNew={!!intent} />;
+}
+
 /** The normal TokenHub conversation surface. Machine RPC is deliberately not used. */
 export function TokenHubConversation({ startNew = false }: { startNew?: boolean } = {}) {
     const auth = useAuth(), router = useRouter(), {theme} = useUnistyles();
@@ -48,6 +57,9 @@ export function TokenHubConversation({ startNew = false }: { startNew?: boolean 
     const [loading, setLoading] = React.useState(true), [busy, setBusy] = React.useState(false), [draft, setDraft] = React.useState('');
     const [error, setError] = React.useState(''), [storageError, setStorageError] = React.useState('');
     const [reload, setReload] = React.useState(0), [blocked, setBlocked] = React.useState(false);
+    const focused = React.useRef(false);
+    const activation = React.useRef({ initialized: false, scope: '', selected: '', model: '', blocked: false, error: '' });
+    Object.assign(activation.current, { selected, model, blocked, error });
     const client = React.useMemo(() => createWorkMockClient({baseUrl:server, requireRealCatalog:true, tokenProvider:async()=>token || null, fetch:tokenHubFetch}), [server,token,reload]);
     const current = conversations.find(item=>item.id===selected);
     const validModel = selectedModelAllowed(catalog, model);
@@ -57,10 +69,17 @@ export function TokenHubConversation({ startNew = false }: { startNew?: boolean 
         try { storage.set(scope, encodeBase64(encryptSecretBox(value, decodeBase64(secret,'base64url')), 'base64')); }
         catch { setStorageError(t('savedError')); }
     }
-    React.useEffect(() => {
+    // Navigator blur releases ownership. Retained screens must not write stale history.
+    useFocusEffect(React.useCallback(() => {
+        const previous = { ...activation.current };
+        const resume = previous.initialized && previous.scope === scope;
+        activation.current.initialized = true; activation.current.scope = scope;
+        focused.current = true;
         const epoch = ++generation.current, controller = new AbortController();
         active.current?.abort(); active.current=null;
-        setCatalog(null);setModel('');setBusy(false);setDraft('');setError('');setLoading(true);setBlocked(false);
+        setCatalog(null);setModel('');setBusy(false);setLoading(true);
+        if (!resume) setDraft('');
+        setError(resume ? previous.error : '');setBlocked(resume && previous.blocked);
         let restored: Conversation[]=[];
         try {
             const stored=storage.getString(scope);
@@ -69,24 +88,29 @@ export function TokenHubConversation({ startNew = false }: { startNew?: boolean 
         } catch { setStorageError(t('savedError')); }
         const interrupted=restored.some(item=>item.turns.some(turn=>turn.status==='streaming'));
         restored=restored.map(item=>({...item,turns:item.turns.map(turn=>turn.status==='streaming'?{...turn,status:'failed' as const}:turn)}));
-        visibleHistory.current=restored;setConversations(restored);setSelected(startNew ? '' : restored[0]?.id || '');
+        const restoredSelection = resume ? (restored.some(item => item.id === previous.selected) ? previous.selected : '')
+            : startNew ? '' : restored[0]?.id || '';
+        const restoredModel = resume ? previous.model || restored.find(item => item.id === restoredSelection)?.model || ''
+            : (startNew ? '' : restored[0]?.model) || '';
+        visibleHistory.current=restored;setConversations(restored);setSelected(restoredSelection);
         if(interrupted){setBlocked(true);setError(t('reconciliation'));}
         void client.getCatalog(controller.signal).then(value=>{
             requireRealCatalog(value);
             if(epoch!==generation.current)return;
-            setCatalog(value);setModel((startNew ? '' : restored[0]?.model) || value.models[0]?.id || '');
+            setCatalog(value);setModel(restoredModel || value.models[0]?.id || '');
         }).catch(()=>{if(epoch===generation.current&&!controller.signal.aborted){setCatalog(null);setModel('');setError(t('catalogError'));}})
           .finally(()=>{if(epoch===generation.current)setLoading(false);});
         return ()=>{
+            focused.current=false;
             try { storage.set(scope,encodeBase64(encryptSecretBox(visibleHistory.current,decodeBase64(secret,'base64url')),'base64')); } catch {}
             generation.current++;controller.abort();active.current?.abort();active.current=null;
         };
-    },[client,scope,secret,startNew]);
+    },[client,scope,secret,startNew]));
     function update(id:string, turn:Turn) {
         const next=visibleHistory.current.map(item=>item.id===id?{...item,turns:[...item.turns.slice(0,-1),turn]}:item);visibleHistory.current=next;setConversations(next);
     }
     async function send() {
-        if(busy || loading || blocked || !validModel)return;
+        if(!focused.current || busy || loading || blocked || !validModel)return;
         const question=composer.current?.getText().trim() || '';
         if(!question)return;
         const history=current?.turns || [];
