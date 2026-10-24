@@ -105,3 +105,41 @@ it('a restored unavailable model stays blocked rather than becoming a fake optio
     await send('must not use saved model');
     expect(fetcher.mock.calls.some(([url])=>url.endsWith('/stream'))).toBe(false);
 });
+
+const platformSession = {authority:'https://accounts.example.test',issuer:'tokenapi',subject:'42',sessionId:'fixture-session',expiresAt:Date.now()+3600000,csrf:'a'.repeat(43)};
+async function renderPlatform() {
+    f.credentials = null as any;
+    const local = new Map<string,string>();
+    vi.stubGlobal('window',{location:{origin:'https://work.example'}});
+    vi.stubGlobal('localStorage',{getItem:(key:string)=>local.get(key)??null,setItem:(key:string,value:string)=>local.set(key,value)});
+    await act(async()=>{renderer=create(React.createElement(TokenHubConversation as React.ComponentType<NonNullable<Parameters<typeof TokenHubConversation>[0]>>,{platformSession}))});
+}
+it('a fresh platform account chats without any Happy credential and sends only its cookie plus CSRF',async()=>{
+    f.storage.set('legacy-device-history','unchanged-encrypted-history');
+    await renderPlatform();
+    expect(composer().props.availableModels.map((x:any)=>x.key)).toEqual(['qwen-current','claude-authorized']);
+    await act(async()=>composer().props.onModelModeChange({key:'claude-authorized',name:'Claude'}));
+    await send('synthetic seedless request');
+    const [url,init]=fetcher.mock.calls.find(([url])=>url.endsWith('/stream'))!;
+    expect(url).toBe('https://work.example/v1/tokenhub/platform/stream');
+    expect(init.credentials).toBe('include');
+    expect(init.headers).toMatchObject({'x-tokenhub-csrf':platformSession.csrf});
+    expect(init.headers).not.toHaveProperty('Authorization');
+    expect(JSON.parse(init.body as string).model).toBe('claude-authorized');
+    expect(f.storage.get('legacy-device-history')).toBe('unchanged-encrypted-history');
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Restore');
+});
+it('platform mode still refuses an empty catalog rather than showing a provider default',async()=>{
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({mode:'real',billable:true,models:[]}),{headers:{'content-type':'application/json'}}));
+    await renderPlatform();await send('not allowed');
+    expect(composer().props.availableModels).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('unreadable encrypted history is never overwritten on unmount',async()=>{
+    const {accountScope}=await import('./TokenHubConversation');
+    const key=accountScope(f.server,f.credentials.token);
+    f.storage.set(key,'invalid-ciphertext');
+    await render();await send('session-only request');
+    await act(async()=>renderer.unmount());
+    expect(f.storage.get(key)).toBe('invalid-ciphertext');
+});

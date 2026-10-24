@@ -41,6 +41,8 @@ export interface WorkMockClientOptions {
     requireRealCatalog?: boolean;
     /** Existing Happy auth token only. Never pass the encryption secret or a TokenHub API key. */
     tokenProvider: () => Promise<string | null>;
+    /** Independent same-origin BFF session. No bearer token or device identity is sent. */
+    platformSession?: { csrf: string; origin: string };
     fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
 
@@ -112,6 +114,7 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
             || base.username || base.password || base.search || base.hash) throw new Error();
     } catch { throw new WorkMockError('configuration'); }
     const baseUrl = base.toString().replace(/\/+$/, '');
+    if (options.platformSession && (base.origin !== options.platformSession.origin || !/^[A-Za-z0-9_-]{43}$/.test(options.platformSession.csrf))) throw new WorkMockError('configuration');
     const transport = options.fetch ?? globalThis.fetch;
     if (typeof transport !== 'function' || typeof options.tokenProvider !== 'function') throw new WorkMockError('configuration');
 
@@ -126,19 +129,19 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
         callerSignal?.addEventListener('abort', onAbort, { once: true });
         const timer = setTimeout(() => { timedOut = true; controller.abort(); }, body && catalog?.mode === 'real' ? WORK_REAL_REQUEST_TIMEOUT_MS : WORK_MOCK_REQUEST_TIMEOUT_MS);
         try {
-            let token: string | null;
-            try { token = await abortable(options.tokenProvider(), controller.signal); }
+            let token: string | null = null;
+            try { if (!options.platformSession) token = await abortable(options.tokenProvider(), controller.signal); }
             catch { throw new WorkMockError(controller.signal.aborted ? 'aborted' : 'authentication'); }
-            if (typeof token !== 'string' || !token || /\s/.test(token)) throw new WorkMockError('authentication');
+            if (!options.platformSession && (typeof token !== 'string' || !token || /\s/.test(token))) throw new WorkMockError('authentication');
             if (controller.signal.aborted) throw new WorkMockError('aborted');
-            const pending = transport(`${baseUrl}/v1/tokenhub/work/${path}`, {
+            const pending = transport(`${baseUrl}/v1/tokenhub/${options.platformSession ? 'platform' : 'work'}/${path}`, {
                 method: body ? 'POST' : 'GET',
                 headers: {
-                    Authorization: `Bearer ${token}`,
+                    ...(options.platformSession ? { 'x-tokenhub-csrf': options.platformSession.csrf } : { Authorization: `Bearer ${token}` }),
                     Accept: body ? 'application/x-ndjson' : 'application/json',
                     ...(body ? { 'Content-Type': 'application/json' } : {}),
                 },
-                credentials: 'omit', redirect: 'error', cache: 'no-store',
+                credentials: options.platformSession ? 'include' : 'omit', redirect: 'error', cache: 'no-store',
                 // The request shape is constructed here, never spread from caller-owned input.
                 ...(body ? { body: JSON.stringify({ model: body.model, ...(body.messages ? { messages: body.messages.map(({role, content}) => ({role, content})) } : { prompt: body.prompt }), ...(body.requestId ? { requestId: body.requestId } : {}) }) } : {}),
                 signal: controller.signal,

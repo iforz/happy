@@ -64,3 +64,10 @@ test('all explicitly registered app stack screens have actual route files', () =
  const config=JSON.parse(execFileSync(process.execPath,[path.join(root,'node_modules/expo/bin/cli'),'config','--type','public','--json'],{cwd:path.join(root,'packages/happy-app'),env:productionWebEnvironment(root,{HAPPY_PRODUCTION_ORIGIN:'https://token.mzyai.com',HAPPY_PRODUCTION_BASE_PATH:'/work'}),encoding:'utf8'}));
  assert.equal(config.experiments.baseUrl,'/work');
  });
+
+test('independent platform login is an explicit build opt-in, never inherited ambient auth',()=>{
+ assert.equal(productionWebEnvironment(root,{}).EXPO_PUBLIC_TOKENHUB_PLATFORM_AUTH,'0');
+ assert.equal(productionWebEnvironment(root,{EXPO_PUBLIC_TOKENHUB_PLATFORM_AUTH:'1'}).EXPO_PUBLIC_TOKENHUB_PLATFORM_AUTH,'0');
+ assert.equal(productionWebEnvironment(root,{HAPPY_PRODUCTION_PLATFORM_AUTH:'1'}).EXPO_PUBLIC_TOKENHUB_PLATFORM_AUTH,'1');
+ assert.throws(()=>productionWebEnvironment(root,{HAPPY_PRODUCTION_PLATFORM_AUTH:'true'}));
+});

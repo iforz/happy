@@ -5,7 +5,9 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Fonts from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { FontAwesome } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname, useGlobalSearchParams, Slot } from 'expo-router';
+import { PlatformSessionProvider, usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { isPlatformRoute } from '@/integrations/tokenhub/platformRouting';
 import { AuthCredentials, TokenStorage } from '@/auth/tokenStorage';
 import { AuthProvider } from '@/auth/AuthContext';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -248,6 +250,28 @@ function getDevWebQueryCredentials(): AuthCredentials | null {
 }
 
 export default function RootLayout() {
+    return <PlatformSessionProvider><RootMode /></PlatformSessionProvider>;
+}
+
+function RootMode() {
+    const platform = usePlatformSession();
+    const pathname = usePathname();
+    const { mode } = useGlobalSearchParams<{ mode?: string }>();
+    // Only deliberate device routes initialize legacy credentials, sync and sockets.
+    const platformOnly = platform.status !== 'disabled' && isPlatformRoute(pathname, mode);
+    const initialRuntime = React.useRef(platformOnly);
+    const switchingRuntime = platform.status !== 'disabled' && initialRuntime.current !== platformOnly;
+    React.useEffect(() => {
+        // Legacy sync/socket is a global singleton without a complete teardown API.
+        // A full document boundary avoids carrying its keys or background work into
+        // the platform runtime, without deleting any device credential or ciphertext.
+        if (switchingRuntime) window.location.reload();
+    }, [switchingRuntime]);
+    if (switchingRuntime) return null;
+    return <RootApp key={platformOnly ? 'platform' : 'device'} platformOnly={platformOnly} />;
+}
+
+function RootApp({ platformOnly }: { platformOnly: boolean }) {
     useTauriZoom();
     useTauriDrag();
     const router = useRouter();
@@ -281,7 +305,7 @@ export default function RootLayout() {
                 await loadFonts();
                 await sodium.ready;
 
-                let credentials = await TokenStorage.getCredentials();
+                let credentials = platformOnly ? null : await TokenStorage.getCredentials();
                 const devCredentials = getDevWebQueryCredentials() ?? getDevEnvironmentCredentials();
 
                 if (hasHarnessDevCredentials() && !isHarnessDevStartup()) {
@@ -296,7 +320,7 @@ export default function RootLayout() {
                     throw new Error('Harness startup did not provide debug credentials.');
                 }
 
-                if (devCredentials) {
+                if (devCredentials && !platformOnly) {
                     const credentialsChanged = credentials?.token !== devCredentials.token
                         || credentials?.secret !== devCredentials.secret;
 
@@ -312,7 +336,7 @@ export default function RootLayout() {
                     }
                 }
 
-                if (credentials) {
+                if (credentials && !platformOnly) {
                     await syncRestore(credentials);
                 }
 
@@ -457,6 +481,7 @@ export default function RootLayout() {
                         <ThemeProvider value={navigationTheme}>
                             <StatusBarProvider />
                             <ModalProvider>
+                                {platformOnly ? <HorizontalSafeAreaWrapper><Slot /></HorizontalSafeAreaWrapper> : <>
                                 <BrowserNavigationShortcuts />
                                 <CommandPaletteProvider>
                                     <RealtimeProvider>
@@ -465,6 +490,7 @@ export default function RootLayout() {
                                         </HorizontalSafeAreaWrapper>
                                     </RealtimeProvider>
                                 </CommandPaletteProvider>
+                                </>}
                             </ModalProvider>
                         </ThemeProvider>
                     </AuthProvider>
