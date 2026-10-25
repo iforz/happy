@@ -8,8 +8,8 @@ import * as React from 'react';
 // @ts-expect-error upstream does not install renderer types
 import { act, create } from 'react-test-renderer';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-const f = vi.hoisted(() => ({ draft: '', id: 0, storage: new Map<string, string>(), keys: new Map<string, string>(), logout: vi.fn(async () => {}), refresh: vi.fn(async () => {}) }));
-vi.mock('react-native', () => ({ View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView' }));
+const f = vi.hoisted(() => ({ draft: '', id: 0, storage: new Map<string, string>(), keys: new Map<string, string>(), logout: vi.fn(async () => {}), refresh: vi.fn(async () => {}), openURL: vi.fn(async () => {}) }));
+vi.mock('react-native', () => ({ View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', Linking: { openURL: f.openURL } }));
 vi.mock('react-native-unistyles', () => ({ useUnistyles: () => ({ theme: { colors: { text: 'black', textSecondary: 'gray', groupped: { background: 'white' } } } }) }));
 vi.mock('react-native-mmkv', () => ({ MMKV: class { getString(key: string) { return f.storage.get(key); } set(key: string, value: string) { f.storage.set(key, value); } } }));
 vi.mock('expo-router', async () => { const R = await import('react'); return { useRouter: () => ({ push: vi.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: (callback: () => void) => R.useEffect(callback, [callback]) }; });
@@ -53,7 +53,15 @@ function server(url: string, init: RequestInit): Promise<Response> {
 const composer = () => renderer.root.findByType('AgentInput');
 const text = () => JSON.stringify(renderer.toJSON());
 function button(label: string) { return renderer.root.findAllByType('Pressable').find((node: any) => (node.props.accessibilityLabel === label || node.props.children?.props?.children === label))!; }
-async function press(label: string) { await act(async () => { button(label).props.onPress(); }); }
+async function press(label: string) {
+    if (label === 'Refresh' || label === 'Sign out of Work') {
+        await act(async () => { button('Settings').props.onPress(); });
+        await act(async () => { button(label === 'Refresh' ? 'Reload models' : label).props.onPress(); });
+        if (label === 'Refresh') await act(async () => { button('Return to Work').props.onPress(); });
+        return;
+    }
+    await act(async () => { button(label).props.onPress(); });
+}
 async function render(value = session, startNew = false) { await act(async () => { renderer = create(React.createElement(ConversationComponent, { platformSession: value, startNew })); }); }
 async function send(value: string) { f.draft = value; await act(async () => composer().props.onChangeText(value)); await act(async () => { composer().props.onSend(); }); }
 function legacy() {
@@ -64,7 +72,7 @@ function legacy() {
     return new Map(f.storage);
 }
 beforeEach(() => {
-    f.draft = ''; f.id = 0; f.storage.clear(); f.keys.clear(); f.logout.mockClear(); f.refresh.mockClear(); records = new Map(); browser = new EventTarget();
+    f.draft = ''; f.id = 0; f.storage.clear(); f.keys.clear(); f.logout.mockClear(); f.refresh.mockClear(); f.openURL.mockClear(); records = new Map(); browser = new EventTarget();
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('window', { location: { origin: 'https://work.example' }, addEventListener: browser.addEventListener.bind(browser), removeEventListener: browser.removeEventListener.bind(browser) });
     vi.stubGlobal('localStorage', { getItem: (key: string) => f.keys.get(key) ?? null, setItem: (key: string, value: string) => f.keys.set(key, value) });
@@ -221,7 +229,7 @@ it('explains disabled basic chat and clears its error when models recover on for
     await render();
     expect(text()).toContain('Chat is not enabled yet.');
     for (const copy of ['Models and access come from', 'New conversations are saved', 'Account conversations', 'Device agents']) expect(text()).not.toContain(copy);
-    expect(text()).not.toContain('Device agents'); expect(text()).toContain('Sign out of Work');
+    expect(text()).not.toContain('Device agents'); expect(text()).toContain('Settings');
     expect(text()).not.toContain('private upstream detail');
     expect(composer().props.blockSend).toBe(true);
     await send('must not send'); expect(fetcher.mock.calls.some(([url]) => url.endsWith('/stream'))).toBe(false);
@@ -259,4 +267,36 @@ it('keeps existing server and browser conversations intact when basic chat is di
     expect(text()).toContain('server-only question'); expect(text()).toContain('private browser-only question');
     expect(text()).not.toContain('Account conversations'); expect(composer().props.blockSend).toBe(false);
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+});
+
+
+it('shows a model selector even with one model, and changes models without device-agent menus', async () => {
+    await render();
+    expect(button('Model: Qwen')).toBeTruthy();
+    await press('Model: Qwen');
+    expect(button('Qwen').props.accessibilityState.checked).toBe(true);
+    await press('Qwen');
+    fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
+        ? Promise.resolve(json({ mode: 'real', billable: true, models: [{ id: 'qwen-current', name: 'Qwen' }, { id: 'deepseek-current', name: 'DeepSeek' }] })) : server(url, init));
+    await press('Refresh');
+    await press('Model: Qwen'); await press('DeepSeek');
+    expect(composer().props.modelMode.key).toBe('deepseek-current');
+    expect(button('Model: DeepSeek')).toBeTruthy();
+    await send('use the selected model');
+    const request = fetcher.mock.calls.find(([url]) => url.endsWith('/stream'))!;
+    expect(JSON.parse(request[1].body).model).toBe('deepseek-current');
+});
+
+it('opens real account and subscription pages and keeps the composer mounted across settings', async () => {
+    await render();
+    const originalComposer = composer();
+    await act(async () => { f.draft = 'unfinished message'; originalComposer.props.onChangeText(f.draft); });
+    await press('Personal center'); expect(f.openURL).toHaveBeenLastCalledWith('https://accounts.example.test/profile');
+    await press('Subscription center'); expect(f.openURL).toHaveBeenLastCalledWith('https://accounts.example.test/purchase');
+    await press('Settings');
+    expect(text()).toContain('My subscriptions'); expect(text()).toContain('Reload models');
+    expect(composer()).toBe(originalComposer);
+    await press('My subscriptions'); expect(f.openURL).toHaveBeenLastCalledWith('https://accounts.example.test/subscriptions');
+    await press('Return to Work');
+    expect(f.draft).toBe('unfinished message'); expect(composer().props.isSendDisabled).toBe(false);
 });
