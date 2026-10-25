@@ -2,7 +2,8 @@ import { useAuth } from '@/auth/AuthContext';
 import * as React from 'react';
 import { Drawer } from 'expo-router/drawer';
 import { useIsTablet, useHeaderHeight, useLayoutDimensions } from '@/utils/responsive';
-import { SidebarView } from './SidebarView';
+import { SidebarView, type PlatformSidebarAdapter } from './SidebarView';
+import { Drawer as DrawerLayout } from 'react-native-drawer-layout';
 import { View, Pressable, Platform } from 'react-native';
 import { useAllMachines, useIsDataReady, useLocalSetting, useLocalSettingMutable } from '@/sync/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +22,7 @@ import { shouldShowFirstRunInstall, shouldSuppressTabletShell } from './onboardi
 
 const TAURI_HEADER_CONTROL_LEFT = Math.ceil(92 / DEFAULT_APP_ZOOM);
 
-export const SidebarNavigator = React.memo(() => {
+const DeviceSidebarNavigator = React.memo(() => {
     const auth = useAuth();
     const isTablet = useIsTablet();
     const isDataReady = useIsDataReady();
@@ -55,7 +56,7 @@ export const SidebarNavigator = React.memo(() => {
     // Calculate target drawer width
     const fullDrawerWidth = React.useMemo(() => {
         if (!isDesktopLayout) return 280;
-        return Math.min(Math.max(Math.floor(windowWidth * 0.3), 250), 360);
+        return sidebarDrawerWidth(windowWidth);
     }, [windowWidth, isDesktopLayout]);
     const drawerWidth = showSidebar ? fullDrawerWidth : 0;
 
@@ -105,7 +106,7 @@ export const SidebarNavigator = React.memo(() => {
     );
 
     return (
-        <View style={{ flex: 1 }}>
+        <SidebarNavigatorSurface>
             <Drawer
                 screenOptions={drawerNavigationOptions}
                 drawerContent={isDesktopLayout ? drawerContent : undefined}
@@ -114,19 +115,14 @@ export const SidebarNavigator = React.memo(() => {
             {isDesktopLayout && (
                 <PersistentHeader />
             )}
-        </View>
+        </SidebarNavigatorSurface>
     );
 });
 
 // Header block that stays in the same position whether zen mode is on or off
 const PersistentHeader = React.memo(() => {
-    const { theme } = useUnistyles();
-    const safeArea = useSafeAreaInsets();
-    const headerHeight = useHeaderHeight();
     const router = useRouter();
     const [zenMode, setZenMode] = useLocalSettingMutable('zenMode');
-    const inTauri = isTauri();
-    const isMacTauri = inTauri && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 
     const routeHistory = useBrowserNavigationStore((s) => s.routeHistory);
     const canGoForward = useBrowserNavigationStore((s) => s.routeHistory ? canRouteForward(s.routeHistory) : false);
@@ -163,6 +159,19 @@ const PersistentHeader = React.memo(() => {
     const canGoBackEffective = canGoBack || overlayCanBack;
     const canGoForwardEffective = canGoForward || overlayCanForward;
 
+    return <PersistentHeaderView zenMode={zenMode} onZenToggle={handleZenToggle} onBack={handleBack} onForward={handleForward} canGoBack={canGoBackEffective} canGoForward={canGoForwardEffective} />;
+});
+
+/** Shared original desktop chrome: account mode supplies actions without device sync. */
+function PersistentHeaderView(props: {
+    zenMode: boolean; onZenToggle: () => void; onBack: () => void; onForward: () => void;
+    canGoBack: boolean; canGoForward: boolean;
+}) {
+    const { theme } = useUnistyles();
+    const safeArea = useSafeAreaInsets();
+    const headerHeight = useHeaderHeight();
+    const inTauri = isTauri();
+    const isMacTauri = inTauri && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
     return (
         <View
             style={{
@@ -188,7 +197,7 @@ const PersistentHeader = React.memo(() => {
                 {...(inTauri ? { dataSet: { tauriDragRegion: 'false' } } : {})}
             >
                 <Pressable
-                    onPress={handleZenToggle}
+                    onPress={props.onZenToggle}
                     hitSlop={10}
                     style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
                     accessibilityLabel={t('zen.toggle')}
@@ -197,18 +206,61 @@ const PersistentHeader = React.memo(() => {
                         source={require('@/assets/images/zen-icon.png')}
                         contentFit="contain"
                         style={{ width: 18, height: 18 }}
-                        tintColor={zenMode ? theme.colors.textLink : theme.colors.header.tint}
+                        tintColor={props.zenMode ? theme.colors.textLink : theme.colors.header.tint}
                     />
                 </Pressable>
-                <Pressable onPress={handleBack} disabled={!canGoBackEffective} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center', opacity: canGoBackEffective ? 1 : 0.3 }}>
+                <Pressable onPress={props.onBack} disabled={!props.canGoBack} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center', opacity: props.canGoBack ? 1 : 0.3 }}>
                     <Ionicons name="chevron-back" size={20} color={theme.colors.header.tint} />
                 </Pressable>
                 {Platform.OS === 'web' && (
-                    <Pressable onPress={handleForward} disabled={!canGoForwardEffective} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center', opacity: canGoForwardEffective ? 1 : 0.3 }}>
+                    <Pressable onPress={props.onForward} disabled={!props.canGoForward} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center', opacity: props.canGoForward ? 1 : 0.3 }}>
                         <Ionicons name="chevron-forward" size={20} color={theme.colors.header.tint} />
                     </Pressable>
                 )}
             </View>
         </View>
     );
-});
+}
+
+export function sidebarDrawerWidth(windowWidth: number): number {
+    return Math.min(Math.max(Math.floor(windowWidth * 0.3), 250), 360);
+}
+
+function SidebarNavigatorSurface({ children }: { children: React.ReactNode }) {
+    return <View style={{ flex: 1 }}>{children}</View>;
+}
+
+export type PlatformNavigatorAdapter = {
+    sidebar: PlatformSidebarAdapter;
+    children: React.ReactNode;
+    onBack?: () => void;
+    canGoBack?: boolean;
+    onForward?: () => void;
+    canGoForward?: boolean;
+};
+const SidebarActions = React.createContext({ isDesktop: false, open: () => {}, close: () => {} });
+export const useSidebarActions = () => React.useContext(SidebarActions);
+
+/** The same drawer engine and original sidebar/header presentation, with an explicit account data port. */
+function PlatformSidebarNavigator({ adapter }: { adapter: PlatformNavigatorAdapter }) {
+    const isDesktop = useIsTablet();
+    const { width } = useLayoutDimensions();
+    const [zenMode, setZenMode] = useLocalSettingMutable('zenMode');
+    const [open, setOpen] = React.useState(false);
+    const close = React.useCallback(() => setOpen(false), []);
+    const actions = React.useMemo(() => ({ isDesktop, open: () => setOpen(true), close }), [isDesktop, close]);
+    const sidebar = { ...adapter.sidebar, onNew: () => { close(); adapter.sidebar.onNew(); }, onSettings: () => { close(); adapter.sidebar.onSettings(); } };
+    return <SidebarActions.Provider value={actions}><SidebarNavigatorSurface>
+        <DrawerLayout open={isDesktop ? !zenMode : open} onOpen={() => setOpen(true)} onClose={close}
+            drawerType={isDesktop ? 'permanent' : 'front'} drawerPosition="left" swipeEnabled={false}
+            drawerStyle={{ backgroundColor: 'white', borderRightWidth: 0, width: isDesktop ? (zenMode ? 0 : sidebarDrawerWidth(width)) : 280, overflow: 'hidden' }}
+            renderDrawerContent={() => <SidebarView platform={sidebar} />}>
+            {adapter.children}
+        </DrawerLayout>
+        {isDesktop ? <PersistentHeaderView zenMode={zenMode} onZenToggle={() => setZenMode(!zenMode)} onBack={adapter.onBack ?? (() => {})} onForward={adapter.onForward ?? (() => {})} canGoBack={!!adapter.canGoBack} canGoForward={!!adapter.canGoForward} /> : null}
+    </SidebarNavigatorSurface></SidebarActions.Provider>;
+}
+
+export const SidebarNavigator = React.memo((props: { platform?: PlatformNavigatorAdapter }) => props.platform
+    ? <PlatformSidebarNavigator adapter={props.platform} />
+    : <DeviceSidebarNavigator />);

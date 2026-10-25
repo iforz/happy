@@ -91,7 +91,7 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
 }));
 
-export const SidebarView = React.memo(() => {
+const DeviceSidebarView = React.memo(() => {
     const styles = stylesheet;
     const safeArea = useSafeAreaInsets();
     const router = useRouter();
@@ -115,23 +115,11 @@ export const SidebarView = React.memo(() => {
             {[['title','/'],['settings','/settings']].map(([key,url])=><Pressable key={url} accessibilityRole="button" onPress={()=>router.push(url as any)} style={{padding:12}}><Text style={styles.newSessionText}>{workText(key as 'title'|'settings')}</Text></Pressable>)}
         </View>;
     }
-    return (
-        <View style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}>
-            <View style={styles.topControls}>
-                <Pressable
-                    onPress={handleNewSession}
-                    style={({ pressed }) => [
-                        styles.newSessionButton,
-                        shortcutHintsVisible && styles.shortcutTargetActive,
-                        pressed && styles.newSessionButtonPressed,
-                    ]}
-                >
-                    <Ionicons name="create-outline" size={16} color={stylesheet.newSessionText.color} />
-                    <Text style={styles.newSessionText}>{t('sidebar.newSession')}</Text>
-                    <ShortcutHintBadge shortcutKey="N" style={styles.shortcutBadgeInline} />
-                </Pressable>
-                {hasArchivedSessions && (
-                    <Pressable
+    return <SidebarFrame
+        newLabel={t('sidebar.newSession')} settingsLabel={t('settings.title')}
+        onNew={handleNewSession} onSettings={() => router.push('/settings')}
+        shortcutHintsVisible={shortcutHintsVisible}
+        archiveControl={hasArchivedSessions ? (<Pressable
                         onPress={handleArchiveVisibility}
                         accessibilityLabel={hideArchivedSessions
                             ? t('sidebar.showArchived')
@@ -149,29 +137,52 @@ export const SidebarView = React.memo(() => {
                             size={18}
                             color={stylesheet.newSessionText.color}
                         />
-                    </Pressable>
-                )}
-            </View>
+                    </Pressable>) : null}
+        status={realtimeStatus !== 'disconnected' ? <VoiceAssistantStatusBar variant="sidebar" /> : null}
+    ><MainView variant="sidebar" /></SidebarFrame>;
 
-            {realtimeStatus !== 'disconnected' && (
-                <VoiceAssistantStatusBar variant="sidebar" />
-            )}
-
-            {/* Sessions list */}
-            <MainView variant="sidebar" />
-
-            {/* Settings at bottom */}
-            <Pressable
-                onPress={() => router.push('/settings')}
-                style={[
-                    styles.settingsRow,
-                    shortcutHintsVisible && styles.shortcutTargetActive,
-                ]}
-            >
-                <Ionicons name="settings-outline" size={18} color={stylesheet.settingsText.color} />
-                <Text style={styles.settingsText}>{t('settings.title')}</Text>
-                <ShortcutHintBadge shortcutKey="," style={styles.shortcutBadgeInline} />
-            </Pressable>
-        </View>
-    );
 });
+
+
+export type PlatformSidebarAdapter = {
+    children: React.ReactNode;
+    onNew: () => void;
+    onSettings: () => void;
+    newLabel?: string;
+    settingsLabel?: string;
+    busy?: boolean;
+};
+
+/** Explicit account-backed mode never mounts the device sidebar controller. */
+export const SidebarView = React.memo((props: { platform?: PlatformSidebarAdapter }) => props.platform
+    ? <SidebarFrame {...props.platform} newLabel={props.platform.newLabel ?? t('sidebar.newSession')} settingsLabel={props.platform.settingsLabel ?? t('settings.title')} />
+    : <DeviceSidebarView />);
+
+/** One original Happy sidebar frame for device sessions and account-backed conversations. */
+function SidebarFrame(props: PlatformSidebarAdapter & {
+    newLabel: string; settingsLabel: string;
+    shortcutHintsVisible?: boolean; archiveControl?: React.ReactNode; status?: React.ReactNode;
+}) {
+    const styles = stylesheet;
+    const safeArea = useSafeAreaInsets();
+    const headerHeight = useHeaderHeight();
+    return <View style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}>
+        <View style={styles.topControls}>
+            <Pressable accessibilityRole="button" accessibilityLabel={props.newLabel} onPress={props.onNew} disabled={props.busy}
+                style={({ pressed }) => [styles.newSessionButton, props.shortcutHintsVisible && styles.shortcutTargetActive, pressed && styles.newSessionButtonPressed, props.busy && { opacity: 0.4 }]}>
+                <Ionicons name="create-outline" size={16} color={styles.newSessionText.color} />
+                <Text style={styles.newSessionText}>{props.newLabel}</Text>
+                {props.shortcutHintsVisible !== undefined ? <ShortcutHintBadge shortcutKey="N" style={styles.shortcutBadgeInline} /> : null}
+            </Pressable>
+            {props.archiveControl}
+        </View>
+        {props.status}
+        {props.children}
+        <Pressable accessibilityRole="button" accessibilityLabel={props.settingsLabel} onPress={props.onSettings}
+            style={[styles.settingsRow, props.shortcutHintsVisible && styles.shortcutTargetActive]}>
+            <Ionicons name="settings-outline" size={18} color={styles.settingsText.color} />
+            <Text style={styles.settingsText}>{props.settingsLabel}</Text>
+            {props.shortcutHintsVisible !== undefined ? <ShortcutHintBadge shortcutKey="," style={styles.shortcutBadgeInline} /> : null}
+        </Pressable>
+    </View>;
+}

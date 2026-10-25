@@ -1,0 +1,41 @@
+import * as React from 'react';
+// @ts-expect-error upstream does not install renderer types
+import { act, create } from 'react-test-renderer';
+import { beforeEach, expect, it, vi } from 'vitest';
+const f = vi.hoisted(() => ({ tablet: false, width: 390, forbidden: vi.fn(() => { throw new Error('device controller was mounted'); }), onNew: vi.fn(), onSettings: vi.fn() }));
+vi.mock('react-native', () => ({ View: 'View', Pressable: 'Pressable', Text: 'Text', Platform: { OS: 'web' } }));
+vi.mock('expo-router/drawer', () => ({ Drawer: 'DeviceDrawer' }));
+vi.mock('react-native-drawer-layout', async () => { const R = await import('react'); return { Drawer: (props: any) => R.createElement('NativeDrawer', props, props.renderDrawerContent(), props.children) }; });
+vi.mock('expo-router', () => ({ usePathname: () => '/', useRouter: () => ({}) }));
+vi.mock('expo-image', () => ({ Image: 'Image' }));
+vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0 }) }));
+vi.mock('@/auth/AuthContext', () => ({ useAuth: f.forbidden }));
+vi.mock('@/sync/storage', async () => { const R = await import('react'); return { useAllMachines: f.forbidden, useIsDataReady: f.forbidden, useLocalSetting: f.forbidden, useRealtimeStatus: f.forbidden, useSettingMutable: f.forbidden, useLocalSettingMutable: () => R.useState(false) }; });
+vi.mock('@/utils/responsive', () => ({ useIsTablet: () => f.tablet, useLayoutDimensions: () => ({ width: f.width }), useHeaderHeight: () => 64 }));
+vi.mock('@/hooks/useVisibleSessionListViewData', () => ({ useHasArchivedSessions: f.forbidden }));
+vi.mock('@/components/MainView', () => ({ MainView: 'DeviceMainView' }));
+vi.mock('@/components/VoiceAssistantStatusBar', () => ({ VoiceAssistantStatusBar: 'DeviceVoice' }));
+vi.mock('@/components/ShortcutHints', () => ({ ShortcutHintBadge: 'ShortcutHintBadge', useShortcutHints: f.forbidden }));
+vi.mock('@/utils/isTauri', () => ({ isTauri: () => false }));
+vi.mock('@/hooks/useTauriZoom', () => ({ DEFAULT_APP_ZOOM: 1 }));
+vi.mock('@/utils/platform', () => ({ isRunningOnMac: () => false }));
+vi.mock('@/-session/sessionOverlayNav', () => ({ useOverlayNav: f.forbidden }));
+vi.mock('@/navigation/browserNavigationStore', () => ({ useBrowserNavigationStore: f.forbidden }));
+vi.mock('@/text', () => ({ t: (key: string) => key, getCurrentLanguage: () => 'en' }));
+vi.mock('@/constants/Typography', () => ({ Typography: { default: () => ({}) } }));
+vi.mock('react-native-unistyles', () => { const theme = { colors: { text: 'black', surface: 'white', surfacePressed: 'gray', surfaceSelected: 'gray', divider: 'gray', groupped: { background: 'white' }, header: { tint: 'black' } } }; return { StyleSheet: { hairlineWidth: 1, create: (factory: any) => factory(theme) }, useUnistyles: () => ({ theme }) }; });
+import { SidebarNavigator, sidebarDrawerWidth, useSidebarActions } from '@/components/SidebarNavigator';
+function Content() { const sidebar = useSidebarActions(); return React.createElement('Pressable', { accessibilityLabel: 'open history', onPress: sidebar.open }); }
+beforeEach(() => { f.tablet = false; f.width = 390; f.forbidden.mockClear(); f.onNew.mockClear(); f.onSettings.mockClear(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); });
+it('uses the original shared sidebar controls and drawer without reading device authentication, machines, or sync', async () => {
+ let tree: ReturnType<typeof create>; await act(async () => { tree = create(React.createElement(SidebarNavigator, { platform: { sidebar: { children: React.createElement('History'), onNew: f.onNew, onSettings: f.onSettings, newLabel: 'New chat', settingsLabel: 'Settings' }, children: React.createElement(Content) } })); });
+ const drawer = () => tree.root.findByType('NativeDrawer' as any);
+ expect(drawer().props.drawerType).toBe('front'); expect(drawer().props.open).toBe(false);
+ await act(async () => tree.root.findByProps({ accessibilityLabel: 'open history' }).props.onPress()); expect(drawer().props.open).toBe(true);
+ await act(async () => tree.root.findByProps({ accessibilityLabel: 'Settings' }).props.onPress()); expect(f.onSettings).toHaveBeenCalledOnce(); expect(drawer().props.open).toBe(false);
+ await act(async () => tree.root.findByProps({ accessibilityLabel: 'New chat' }).props.onPress()); expect(f.onNew).toHaveBeenCalledOnce();
+ expect(f.forbidden).not.toHaveBeenCalled(); expect(tree.root.findAllByType('DeviceMainView' as any)).toHaveLength(0);
+ expect(sidebarDrawerWidth(1200)).toBe(360); expect(sidebarDrawerWidth(800)).toBe(250);
+ await act(async () => tree.unmount());
+});

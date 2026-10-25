@@ -128,119 +128,18 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
         onLongPress: showActionAlert,
     };
 
-    const content = (
-        <Pressable
-            style={[styles.row, selected && styles.rowSelected]}
-            {...sessionPressHandlers}
-            {...menuProps}
-        >
-            <View style={[styles.avatar, faded && styles.avatarFaded]}>
-                <Avatar
-                    bot={!!session.botId}
-                    id={session.avatarId}
-                    size={AVATAR_SIZE}
-                    monochrome={faded}
-                    flavor={session.flavor}
-                    clientId={session.clientId}
-                    imageUrl={session.avatarUri}
-                    thumbhash={session.avatarThumbhash}
-                    badgeLocation="sessionList"
-                />
-            </View>
-
-            <View style={[styles.content, faded && styles.contentFaded]}>
-                <View style={styles.titleRow}>
-                    <View style={styles.titleContainer}>
-                        {presentation.shimmerTitle ? (
-                            <ShimmerText
-                                text={session.name}
-                                style={styles.title}
-                                baseColor={theme.colors.textSecondary}
-                                highlightColor={theme.colors.text}
-                            />
-                        ) : (
-                            <Text
-                                style={[
-                                    styles.title,
-                                    faded ? styles.titleDisconnected : styles.titleConnected,
-                                ]}
-                                numberOfLines={1}
-                            >
-                                {session.name}
-                            </Text>
-                        )}
-                    </View>
-                    <SessionShortcutHintBadge sessionId={session.id} style={styles.shortcutBadge} />
-                    <View
-                        style={styles.topRightStatus}
-                        accessible={topRightAccessibilityLabel !== undefined}
-                        accessibilityRole={topRightAccessibilityLabel ? 'text' : undefined}
-                        accessibilityLabel={topRightAccessibilityLabel}
-                    >
-                        <Text
-                            style={[
-                                styles.timestamp,
-                                presentation.topRight.type === 'dot' && styles.timestampHidden,
-                            ]}
-                            numberOfLines={1}
-                            accessibilityElementsHidden={presentation.topRight.type === 'dot'}
-                            importantForAccessibility={presentation.topRight.type === 'dot' ? 'no-hide-descendants' : 'auto'}
-                        >
-                            {timestamp}
-                        </Text>
-                        {presentation.topRight.type === 'dot' && (
-                            <View style={styles.statusDotOverlay}>
-                                <StatusDot
-                                    color={presentation.topRight.color}
-                                    size={TOP_RIGHT_DOT_SIZE}
-                                />
-                            </View>
-                        )}
-                    </View>
-                </View>
-
-                <Text style={styles.project} numberOfLines={1}>
-                    {projectName}
-                </Text>
-
-                <View style={styles.workspaceRow}>
-                    <View style={styles.workspaceLocation}>
-                        {workspaceName && (
-                            <>
-                                <Text style={styles.workspace} numberOfLines={1}>
-                                    {workspaceName}
-                                </Text>
-                                <Ionicons
-                                    name="git-branch-outline"
-                                    size={13}
-                                    color={theme.colors.textSecondary}
-                                />
-                            </>
-                        )}
-                    </View>
-                    <View style={styles.workspaceMeta}>
-                        {session.hasDraft && (
-                            <Ionicons
-                                name="create-outline"
-                                size={13}
-                                color={theme.colors.textSecondary}
-                            />
-                        )}
-                        {session.gitChangedFiles !== null && (
-                            <RigGitLineChanges
-                                changedFiles={session.gitChangedFiles}
-                                countsExact={session.gitCountsExact}
-                                deletions={session.gitDeletions ?? 0}
-                                insertions={session.gitInsertions ?? 0}
-                            />
-                        )}
-                    </View>
-                </View>
-            </View>
-
-            {showBorder && <View style={styles.divider} />}
-        </Pressable>
-    );
+    const content = <FlatSessionRowView
+        selected={selected} faded={faded} showBorder={showBorder}
+        onPressProps={{ ...sessionPressHandlers, ...menuProps }}
+        avatar={<Avatar bot={!!session.botId} id={session.avatarId} size={AVATAR_SIZE} monochrome={faded} flavor={session.flavor} clientId={session.clientId} imageUrl={session.avatarUri} thumbhash={session.avatarThumbhash} badgeLocation="sessionList" />}
+        title={session.name} shimmerTitle={presentation.shimmerTitle}
+        shortcut={<SessionShortcutHintBadge sessionId={session.id} style={styles.shortcutBadge} />}
+        timestamp={timestamp} statusLabel={topRightAccessibilityLabel}
+        statusDot={presentation.topRight.type === 'dot' ? <StatusDot color={presentation.topRight.color} size={TOP_RIGHT_DOT_SIZE} /> : null}
+        projectName={projectName}
+        workspace={workspaceName ? <><Text style={styles.workspace} numberOfLines={1}>{workspaceName}</Text><Ionicons name="git-branch-outline" size={13} color={theme.colors.textSecondary} /></> : null}
+        metadata={<>{session.hasDraft ? <Ionicons name="create-outline" size={13} color={theme.colors.textSecondary} /> : null}{session.gitChangedFiles !== null ? <RigGitLineChanges changedFiles={session.gitChangedFiles} countsExact={session.gitCountsExact} deletions={session.gitDeletions ?? 0} insertions={session.gitInsertions ?? 0} /> : null}</>}
+    />;
 
     if (!swipeEnabled) {
         return (
@@ -276,6 +175,93 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
         </Swipeable>
     );
 });
+
+
+/** The real Happy session row, with presentation data and actions supplied by its backend. */
+export function FlatSessionRowView(props: {
+    title: string; avatar: React.ReactNode; timestamp: string;
+    selected?: boolean; faded?: boolean; shimmerTitle?: boolean; showBorder?: boolean;
+    shortcut?: React.ReactNode; statusLabel?: string; statusDot?: React.ReactNode;
+    projectName?: string; workspace?: React.ReactNode; metadata?: React.ReactNode;
+    onPressProps?: React.ComponentProps<typeof Pressable>;
+}) {
+    const styles = stylesheet;
+    const { theme } = useUnistyles();
+    return (
+        <Pressable
+            style={[styles.row, props.selected && styles.rowSelected]}
+            {...props.onPressProps}
+        >
+            <View style={[styles.avatar, props.faded && styles.avatarFaded]}>
+                {props.avatar}
+            </View>
+
+            <View style={[styles.content, props.faded && styles.contentFaded]}>
+                <View style={styles.titleRow}>
+                    <View style={styles.titleContainer}>
+                        {props.shimmerTitle ? (
+                            <ShimmerText
+                                text={props.title}
+                                style={styles.title}
+                                baseColor={theme.colors.textSecondary}
+                                highlightColor={theme.colors.text}
+                            />
+                        ) : (
+                            <Text
+                                style={[
+                                    styles.title,
+                                    props.faded ? styles.titleDisconnected : styles.titleConnected,
+                                ]}
+                                numberOfLines={1}
+                            >
+                                {props.title}
+                            </Text>
+                        )}
+                    </View>
+                    {props.shortcut}
+                    <View
+                        style={styles.topRightStatus}
+                        accessible={props.statusLabel !== undefined}
+                        accessibilityRole={props.statusLabel ? 'text' : undefined}
+                        accessibilityLabel={props.statusLabel}
+                    >
+                        <Text
+                            style={[
+                                styles.timestamp,
+                                !!props.statusDot && styles.timestampHidden,
+                            ]}
+                            numberOfLines={1}
+                            accessibilityElementsHidden={!!props.statusDot}
+                            importantForAccessibility={!!props.statusDot ? 'no-hide-descendants' : 'auto'}
+                        >
+                            {props.timestamp}
+                        </Text>
+                        {!!props.statusDot && (
+                            <View style={styles.statusDotOverlay}>
+                                {props.statusDot}
+                            </View>
+                        )}
+                    </View>
+                </View>
+
+                <Text style={styles.project} numberOfLines={1}>
+                    {props.projectName}
+                </Text>
+
+                <View style={styles.workspaceRow}>
+                    <View style={styles.workspaceLocation}>
+                        {props.workspace}
+                    </View>
+                    <View style={styles.workspaceMeta}>
+                        {props.metadata}
+                    </View>
+                </View>
+            </View>
+
+            {props.showBorder && <View style={styles.divider} />}
+        </Pressable>
+    );
+}
 
 const stylesheet = StyleSheet.create((theme) => ({
     row: {
