@@ -1,3 +1,5 @@
+import { usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { workText } from '@/integrations/tokenhub/workText';
 import { resolveLanguageTag } from '@/text/_all';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +22,7 @@ interface LanguageItem {
 }
 
 export default function LanguageSettingsScreen() {
+    const platform = usePlatformSession();
     const { theme } = useUnistyles();
     const [preferredLanguage, setPreferredLanguage] = usePlatformPreference('preferredLanguage');
     const { reloadApp } = useUpdates();
@@ -74,7 +77,7 @@ export default function LanguageSettingsScreen() {
         <ItemList style={{ paddingTop: 0 }}>
             <ItemGroup 
                 title={t('settingsLanguage.currentLanguage')} 
-                footer={t('settingsLanguage.description')}
+                footer={platform.status !== 'disabled' ? workText('localPreferenceDescription') : t('settingsLanguage.description')}
             >
                 {languageOptions.map((option) => (
                     <Item

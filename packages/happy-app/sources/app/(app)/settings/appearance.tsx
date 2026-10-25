@@ -1,3 +1,5 @@
+import { usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { workText } from '@/integrations/tokenhub/workText';
 import { Ionicons } from '@expo/vector-icons';
 import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
@@ -214,6 +216,7 @@ function BubbleColorOption(props: {
 }
 
 export default function AppearanceSettingsScreen() {
+    const platform = usePlatformSession();
     const { theme } = useUnistyles();
     const router = useRouter();
     const [showLineNumbersInToolViews, setShowLineNumbersInToolViews] = usePlatformPreference('showLineNumbersInToolViews');
@@ -300,7 +303,7 @@ export default function AppearanceSettingsScreen() {
             </ItemGroup>
 
             {/* Language Settings */}
-            <ItemGroup title={t('settingsLanguage.title')} footer={t('settingsLanguage.description')}>
+            <ItemGroup title={t('settingsLanguage.title')} footer={platform.status !== 'disabled' ? workText('localPreferenceDescription') : t('settingsLanguage.description')}>
                 <Item
                     title={t('settingsLanguage.currentLanguage')}
                     icon={<Ionicons name="language-outline" size={29} color="#007AFF" />}

@@ -21,10 +21,10 @@ beforeEach(() => { f.session = { authority: 'https://token.example.test', subjec
 it('uses native rows and real account links without device-only actions', async () => {
  let tree: ReturnType<typeof create>; await act(async () => { tree = create(React.createElement(PlatformSettingsView)); });
  const rows = tree.root.findAllByType('Item' as any);
- expect(rows.map((row: any) => row.props.title)).toEqual(['settings.account', 'Subscriptions', 'settings.appearance', 'settingsLanguage.currentLanguage', 'Sign out of Work']);
- await act(async () => rows[0].props.onPress()); await act(async () => rows[1].props.onPress());
- expect(f.open.mock.calls.map(([url]) => url)).toEqual(['https://token.example.test/profile', 'https://token.example.test/subscriptions']);
- await act(async () => rows[2].props.onPress()); expect(f.push).toHaveBeenCalledWith('/settings/appearance'); expect(f.session.subject).toBe('42'); await act(async () => tree.unmount());
+ expect(rows.map((row: any) => row.props.title)).toEqual(['settings.account', 'Subscription center', 'My subscriptions', 'settings.appearance', 'settingsLanguage.currentLanguage', 'Sign out of Work']);
+ await act(async () => rows[0].props.onPress()); await act(async () => rows[1].props.onPress()); await act(async () => rows[2].props.onPress());
+ expect(f.open.mock.calls.map(([url]) => url)).toEqual(['https://token.example.test/profile', 'https://token.example.test/purchase', 'https://token.example.test/subscriptions']);
+ await act(async () => rows[3].props.onPress()); expect(f.push).toHaveBeenCalledWith('/settings/appearance'); expect(f.session.subject).toBe('42'); await act(async () => tree.unmount());
 });
 it('keeps account operations unavailable without a cookie session', async () => {
  f.session = null; let tree: ReturnType<typeof create>; await act(async () => { tree = create(React.createElement(PlatformSettingsView)); });

@@ -15,7 +15,7 @@ import { PlatformWelcome } from './PlatformWelcome';
 import { workText } from './workText';
 
 export type PlatformSettingsProps = { topContentInset?: number; bottomContentInset?: number; onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void };
-export function platformAccountURL(authority: string, page: 'profile' | 'subscriptions'): string {
+export function platformAccountURL(authority: string, page: 'profile' | 'purchase' | 'subscriptions'): string {
     const origin = new URL(authority);
     if (origin.protocol !== 'https:' || origin.username || origin.password) throw new Error('Invalid account authority');
     return new URL('/' + page, origin.origin).href;
@@ -24,12 +24,13 @@ export function PlatformSettingsView({ topContentInset = 0, bottomContentInset =
     const platform = usePlatformSession(), router = useRouter(), { theme } = useUnistyles();
     const [error, setError] = React.useState('');
     if (platform.status !== 'ready' || !platform.session) return <PlatformWelcome />;
-    const account = (page: 'profile' | 'subscriptions') => { void openExternalUrl(platformAccountURL(platform.session!.authority, page)); };
+    const account = (page: 'profile' | 'purchase' | 'subscriptions') => { void openExternalUrl(platformAccountURL(platform.session!.authority, page)); };
     return <ItemList style={{ paddingTop: 0 }} containerStyle={{ paddingTop: topContentInset, paddingBottom: bottomContentInset }} onScroll={onScroll} scrollEventThrottle={16}>
         <View style={{ maxWidth: layout.maxWidth, alignSelf: 'center', width: '100%', alignItems: 'center', paddingVertical: 24 }}><HappyEngineeringWordmark height={72} /></View>
         <ItemGroup title={t('settings.account')}>
             <Item title={t('settings.account')} icon={<Ionicons name="person-circle-outline" size={29} color="#007AFF" />} onPress={() => account('profile')} />
-            <Item title={workText('subscriptions')} icon={<Ionicons name="card-outline" size={29} color="#5856D6" />} onPress={() => account('subscriptions')} />
+            <Item title={workText('subscriptionCenter')} icon={<Ionicons name="card-outline" size={29} color="#5856D6" />} onPress={() => account('purchase')} />
+            <Item title={workText('mySubscriptions')} icon={<Ionicons name="card-outline" size={29} color="#5856D6" />} onPress={() => account('subscriptions')} />
         </ItemGroup>
         {!accountOnly ? <ItemGroup title={t('settings.features')}>
             <Item title={t('settings.appearance')} subtitle={t('settings.appearanceSubtitle')} icon={<Ionicons name="color-palette-outline" size={29} color="#5856D6" />} onPress={() => router.push('/settings/appearance')} />
