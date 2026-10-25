@@ -376,3 +376,25 @@ describe('account conversation routing', () => {
         expect(JSON.parse(fetch.mock.calls[0][1].body as string)).toEqual(input);
     });
 });
+
+
+describe('bounded catalog diagnostics', () => {
+    it.each(['work_gateway_disabled', 'work_gateway_unavailable', 'work_authority_unavailable', 'work_key_lookup_unavailable'])('retains fixed diagnostic %s without exposing upstream details', async code => {
+        const { client } = setup(new Response(JSON.stringify({ code, error: 'private upstream message' }), { status: 503, headers: { 'content-type': 'application/json' } }));
+        const error = await client.getCatalog().catch(value => value);
+        expect(error).toMatchObject({ kind: 'unavailable', status: 503, diagnostic: code });
+        expect(String(error)).not.toContain('private');
+    });
+    it.each([
+        [503, 'application/json', JSON.stringify({ code: 'private-secret' })],
+        [503, 'application/json', JSON.stringify({ code: 'work_gateway_disabled', padding: 'x'.repeat(4096) })],
+        [503, 'text/html', JSON.stringify({ code: 'work_gateway_disabled' })],
+        [401, 'application/json', JSON.stringify({ code: 'work_gateway_disabled' })],
+        [503, 'application/json', '{'],
+    ])('ignores untrusted diagnostic for HTTP %s and type %s', async (status, type, body) => {
+        const { client } = setup(new Response(body as string, { status: status as number, headers: { 'content-type': type as string } }));
+        const error = await client.getCatalog().catch(value => value);
+        expect(error).toBeInstanceOf(WorkMockError);
+        expect(error.status).toBe(status); expect(error.diagnostic).toBeUndefined();
+    });
+});

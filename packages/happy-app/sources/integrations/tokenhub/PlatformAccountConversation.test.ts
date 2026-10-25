@@ -207,3 +207,25 @@ it('a late list response cannot resurrect a confirmed deleted account conversati
     await act(async () => resolve(json({ conversations: [{ id, model: 'qwen-current', title: 'server-only question', updatedAt: 10, lastStatus: 'complete' }] })));
     expect(records.has(id)).toBe(false); expect(text()).not.toContain('server-only question');
 });
+
+
+it('explains disabled basic chat and clears its error when models recover on foreground refresh', async () => {
+    fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
+        ? Promise.resolve(new Response(JSON.stringify({ code: 'work_gateway_disabled', error: 'private upstream detail' }), { status: 503, headers: { 'content-type': 'application/json' } })) : server(url, init));
+    await render();
+    expect(text()).toContain('select a group and models in TokenHub Work settings');
+    expect(text()).not.toContain('private upstream detail');
+    expect(composer().props.blockSend).toBe(true);
+    await send('must not send'); expect(fetcher.mock.calls.some(([url]) => url.endsWith('/stream'))).toBe(false);
+    fetcher.mockImplementation(server);
+    await act(async () => { browser.dispatchEvent(new Event('focus')); });
+    expect(text()).not.toContain('TokenHub chat is not enabled');
+    expect(composer().props.blockSend).toBe(false);
+});
+it('refreshes login after a catalog authorization expires without enabling sending', async () => {
+    fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
+        ? Promise.resolve(new Response('', { status: 401 })) : server(url, init));
+    await render();
+    expect(text()).toContain('Your authorization has expired');
+    expect(f.refresh).toHaveBeenCalled(); expect(composer().props.blockSend).toBe(true);
+});

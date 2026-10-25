@@ -28,9 +28,11 @@ export type WorkMockErrorKind = 'configuration' | 'authentication' | 'forbidden'
     | 'unavailable' | 'http' | 'network' | 'aborted' | 'timeout' | 'invalid_request'
     | 'invalid_response' | 'response_limit' | 'truncated_stream' | 'upstream'
     | 'usage_unavailable' | 'request_conflict' | 'core_gateway_error' | 'quota_exceeded' | 'work_reconciliation_required';
+export const WORK_CATALOG_DIAGNOSTICS = ['work_gateway_disabled', 'work_gateway_unavailable', 'work_authority_unavailable', 'work_key_lookup_unavailable'] as const;
+export type WorkCatalogDiagnostic = typeof WORK_CATALOG_DIAGNOSTICS[number];
 export class WorkMockError extends Error {
-    constructor(public readonly kind: WorkMockErrorKind, public readonly status?: number) {
-        // Never expose response bodies, prompt, auth tokens, URLs, or upstream diagnostics.
+    constructor(public readonly kind: WorkMockErrorKind, public readonly status?: number, public readonly diagnostic?: WorkCatalogDiagnostic) {
+        // Only fixed catalog diagnostics may be exposed, never upstream bodies or credentials.
         super(`Work mock request failed (${kind})`);
         this.name = 'WorkMockError';
     }
@@ -150,10 +152,18 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
             void pending.then(response => { if (controller.signal.aborted) cancelBody(response); }, () => {});
             const response = await abortable(pending, controller.signal);
             if (!response.ok) {
-                cancelBody(response);
+                let diagnostic: WorkCatalogDiagnostic | undefined;
+                if (!body && response.status === 503 && response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'application/json') {
+                    try {
+                        let text = '';
+                        for await (const chunk of textChunks(response, controller.signal, 4096)) text += chunk;
+                        const value = parseJSON(text);
+                        if (record(value) && typeof value.code === 'string' && (WORK_CATALOG_DIAGNOSTICS as readonly string[]).includes(value.code)) diagnostic = value.code as WorkCatalogDiagnostic;
+                    } catch { /* Optional bounded diagnostics must not replace the original HTTP failure. */ }
+                } else cancelBody(response);
                 const kind = response.status === 401 ? 'authentication' : response.status === 403 ? 'forbidden'
                     : response.status === 402 ? 'quota_exceeded' : response.status === 409 ? 'request_conflict' : response.status === 429 ? 'rate_limit' : response.status === 503 ? 'unavailable' : 'http';
-                throw new WorkMockError(kind, response.status);
+                throw new WorkMockError(kind, response.status, diagnostic);
             }
             const expectedType = body ? 'application/x-ndjson' : 'application/json';
             if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== expectedType) {
@@ -172,7 +182,6 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
     }
 
     async function getCatalog(signal?: AbortSignal): Promise<WorkModelCatalog> {
-        catalog = undefined;
         catalog = undefined;
         return request('models', undefined, signal, async (response, requestSignal) => {
             let text = '';

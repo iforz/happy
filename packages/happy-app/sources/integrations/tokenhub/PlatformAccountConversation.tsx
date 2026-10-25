@@ -53,6 +53,7 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
     const [missingConversation, setMissingConversation] = React.useState<string | null>(null);
     const [local, setLocal] = React.useState<Conversation[]>([]);
     const [catalog, setCatalog] = React.useState<WorkModelCatalog | null>(null), [model, setModel] = React.useState('');
+    const [catalogError, setCatalogError] = React.useState('');
     const [loading, setLoading] = React.useState(true), [historyLoading, setHistoryLoading] = React.useState(false);
     const [busy, setBusy] = React.useState(false), [mutating, setMutating] = React.useState(false), [engaged, setEngaged] = React.useState(false);
     const [draft, setDraft] = React.useState(''), [error, setError] = React.useState(''), [historyError, setHistoryError] = React.useState(''), [detailError, setDetailError] = React.useState(''), [localError, setLocalError] = React.useState('');
@@ -141,8 +142,17 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
             void client.getCatalog(request.signal).then(value => {
                 requireRealCatalog(value);
                 if (!currentEpoch(generation)) return;
-                setCatalog(value); setModel(previous => previous || value.models[0]?.id || '');
-            }).catch(() => { if (currentEpoch(generation) && !request.signal.aborted) setError(t('catalogError')); })
+                setCatalogError(''); setCatalog(value); setModel(previous => previous || value.models[0]?.id || '');
+            }).catch(cause => {
+                if (!currentEpoch(generation) || request.signal.aborted) return;
+                if (cause instanceof WorkMockError && cause.kind === 'authentication') { authenticationFailed(); return; }
+                const diagnostic = cause instanceof WorkMockError ? cause.diagnostic : undefined;
+                setCatalogError(t(diagnostic === 'work_gateway_disabled' ? 'catalogDisabled'
+                    : diagnostic === 'work_gateway_unavailable' ? 'catalogServiceUnavailable'
+                    : diagnostic === 'work_authority_unavailable' ? 'catalogAuthorityUnavailable'
+                    : diagnostic === 'work_key_lookup_unavailable' ? 'catalogKeyUnavailable'
+                    : cause instanceof WorkMockError && cause.kind === 'forbidden' ? 'forbidden' : 'catalogError'));
+            })
                 .finally(() => { requests.current.delete(request); if (currentEpoch(generation)) setLoading(false); });
             void loadList(generation);
             if (selectionRef.current?.kind === 'cloud') void loadConversation(selectionRef.current.id, generation, true, true);
@@ -256,7 +266,7 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
         {loading ? <Text style={{ color: theme.colors.textSecondary }}>{t('loading')}</Text> : null}
         {historyLoading ? <Text style={{ color: theme.colors.textSecondary }}>{t('historyLoading')}</Text> : null}
         {!loading && catalog && !catalog.models.length ? <Text style={{ color: theme.colors.textSecondary }}>{t('empty')}</Text> : null}
-        {[error, historyError, detailError, localError].filter(Boolean).map((message, index) => <Text key={index} accessibilityRole="alert" style={{ color: theme.colors.text }}>{message}</Text>)}
+        {[error, catalogError, historyError, detailError, localError].filter(Boolean).map((message, index) => <Text key={index} accessibilityRole="alert" style={{ color: theme.colors.text }}>{message}</Text>)}
         {!loading && !validModel && model ? <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>{t('unavailable')}</Text> : null}
         {serverStreaming && !busy ? <Text style={{ color: theme.colors.textSecondary }}>{t('serverStreaming')}</Text> : null}
         {link(t('reloadHistory'), () => { if (!busy && !mutating) { setError(''); setReload(value => value + 1); } }, busy || mutating)}
