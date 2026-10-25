@@ -78,6 +78,8 @@ interface AgentInputProps {
     availableModes?: PermissionMode[];
     onPermissionModeChange?: (mode: PermissionMode) => void;
     modelMode?: ModelMode | null;
+    /** Expose the native model picker without device permission controls. */
+    modelPickerOnly?: boolean;
     availableModels?: ModelMode[];
     onModelModeChange?: (mode: ModelMode) => void;
     effortLevel?: EffortLevel | null;
@@ -1500,7 +1502,14 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         <View style={styles.actionButtonsContainer}>
             <View style={{ flexDirection: 'column', flex: 1, gap: 2 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    {props.zenMode && <View style={{ flex: 1 }} />}
+                    {props.modelPickerOnly && <View style={{ flex: 1, alignItems: 'flex-start' }}>
+                        {useNativeSettingsMenus ? <NativeSettingsMenu accessibilityLabel={t('agentInput.model.title')} groups={modelProviderSettingsGroups} triggerLabel={modelLabel}>
+                            <View style={styles.mobileModelMenuContent}>{renderModelValue()}</View>
+                        </NativeSettingsMenu> : <BubblePressable onPress={handleModelPress} disabled={!canOpenModelPicker} style={styles.mobileModeButton} accessibilityRole="button" accessibilityLabel={t('agentInput.model.title')}>
+                            {renderModelValue()}
+                        </BubblePressable>}
+                    </View>}
+                    {props.zenMode && !props.modelPickerOnly && <View style={{ flex: 1 }} />}
                     {!props.zenMode && <View style={styles.actionButtonsLeft}>
                         {props.onPermissionModeChange && (
                             useNativeSettingsMenus ? (
@@ -1870,7 +1879,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 {/* A full-window sheet rather than an overlay inside the
                     composer: Android clips an overlay to the composer's bounds,
                     which left its list unscrollable and taps outside it dead. */}
-                {compactMobileComposer && !useNativeSettingsMenus && openPicker && (
+                {(compactMobileComposer || props.modelPickerOnly) && !useNativeSettingsMenus && openPicker && (
                     <PickerSheet
                         visible
                         title={openPicker === 'permission'
@@ -2068,7 +2077,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             )
                         )}
 
-                        {!props.zenMode ? (
+                        {(!props.zenMode || props.modelPickerOnly) ? (
                             <>
                                 {/* Pushes model/effort right, so the effort chip
                                     sits against the send button and the pair does

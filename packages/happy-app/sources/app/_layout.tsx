@@ -17,6 +17,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SidebarNavigator } from '@/components/SidebarNavigator';
+import { PlatformNavigationProvider, PlatformNavigationLayout } from '@/integrations/tokenhub/PlatformNavigation';
 import sodium from '@/encryption/libsodium.lib';
 import { View, Platform, AppState, LogBox } from 'react-native';
 import { ModalProvider } from '@/modal';
@@ -281,6 +282,14 @@ function RootMode() {
     return <RootApp key={platformOnly ? 'platform' : 'device'} platformOnly={platformOnly} />;
 }
 
+function PlatformRuntimeNavigation() {
+    const { session } = usePlatformSession();
+    if (!session) return <Slot />;
+    return <PlatformNavigationProvider scope={JSON.stringify([session.authority, session.subject, session.sessionId])}>
+        <HorizontalSafeAreaWrapper><PlatformNavigationLayout><Slot /></PlatformNavigationLayout></HorizontalSafeAreaWrapper>
+    </PlatformNavigationProvider>;
+}
+
 function RootApp({ platformOnly }: { platformOnly: boolean }) {
     useTauriZoom();
     useTauriDrag();
@@ -491,7 +500,7 @@ function RootApp({ platformOnly }: { platformOnly: boolean }) {
                         <ThemeProvider value={navigationTheme}>
                             <StatusBarProvider />
                             <ModalProvider>
-                                {platformOnly ? <HorizontalSafeAreaWrapper><Slot /></HorizontalSafeAreaWrapper> : <>
+                                {platformOnly ? <PlatformRuntimeNavigation /> : <>
                                 <BrowserNavigationShortcuts />
                                 <CommandPaletteProvider>
                                     <RealtimeProvider>
