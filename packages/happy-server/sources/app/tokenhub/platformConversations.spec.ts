@@ -12,13 +12,13 @@ import {
 } from './platformConversations';
 
 const owner = { authority: 'https://accounts.example.test', issuer: 'tokenapi', subject: '42' };
-const prompt = (conversationId = randomUUID(), requestId = randomUUID()): BeginPlatformConversation => ({
+const prompt = (conversationId: string = randomUUID(), requestId: string = randomUUID()): BeginPlatformConversation => ({
     conversationId, requestId, model: 'test-model', messages: [{ role: 'user', content: 'hello' }],
 });
 function usage(id: string): PlatformConversationUsage {
     return { requestId: id, model: 'test-model', inputTokens: 2, outputTokens: 3, mock: false, billable: true, accounting: 'core' };
 }
-const importedTurn = (id = randomUUID()): PlatformConversationTurn => ({ id, user: 'hello', assistant: 'world', status: 'complete' });
+const importedTurn = (id: string = randomUUID()): PlatformConversationTurn => ({ id, user: 'hello', assistant: 'world', status: 'complete' });
 
 describe('platform account history using the real PostgreSQL-compatible store', () => {
     let pg: PGlite, client: PrismaClient, otherClient: PrismaClient, repository: PlatformConversations, time: number;
