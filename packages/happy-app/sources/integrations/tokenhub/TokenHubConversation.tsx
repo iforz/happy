@@ -46,14 +46,15 @@ export function TokenHubHomeConversation() {
 }
 
 export function PlatformHomeConversation({ session }: { session: PlatformSession }) {
-    const { newChat } = useLocalSearchParams<{ newChat?: string }>();
+    const { newChat, conversationId } = useLocalSearchParams<{ newChat?: string; conversationId?: string }>();
     const intent = typeof newChat === 'string' ? newChat : '';
-    return <TokenHubConversation key={JSON.stringify([platformAccountScope(session), session.sessionId, session.csrf, intent])} startNew={!!intent} platformSession={session} />;
+    const initialConversationId = !intent && typeof conversationId === 'string' ? conversationId : undefined;
+    return <TokenHubConversation key={JSON.stringify([platformAccountScope(session), session.sessionId, session.csrf, intent, initialConversationId])} startNew={!!intent} initialConversationId={initialConversationId} platformSession={session} />;
 }
 
 /** The normal TokenHub conversation surface. Machine RPC is deliberately not used. */
-export function TokenHubConversation({ startNew = false, platformSession }: { startNew?: boolean; platformSession?: PlatformSession } = {}) {
-    if (platformSession) return <PlatformAccountConversation key={JSON.stringify([platformAccountScope(platformSession), platformSession.sessionId, platformSession.csrf])} session={platformSession} startNew={startNew} />;
+export function TokenHubConversation({ startNew = false, platformSession, initialConversationId }: { startNew?: boolean; platformSession?: PlatformSession; initialConversationId?: string } = {}) {
+    if (platformSession) return <PlatformAccountConversation key={JSON.stringify([platformAccountScope(platformSession), platformSession.sessionId, platformSession.csrf, initialConversationId])} session={platformSession} startNew={startNew} initialConversationId={initialConversationId} />;
     return <LocalTokenHubConversation startNew={startNew} />;
 }
 

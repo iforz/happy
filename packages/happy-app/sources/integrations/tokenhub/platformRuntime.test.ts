@@ -1,3 +1,4 @@
+vi.mock('@/integrations/tokenhub/PlatformNavigation', () => ({ PlatformNavigationProvider: 'PlatformNavigationProvider', PlatformNavigationLayout: 'PlatformNavigationLayout' }));
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const f = vi.hoisted(() => ({ path: '/', mode: undefined as string | undefined, platformFlow: false, legacyFlow: false,
     credentials: { token: 'synthetic-device-token', secret: 'synthetic-device-secret' }, getCredentials: vi.fn(), syncRestore: vi.fn(),
     reload: vi.fn(), assign: vi.fn(), replace: vi.fn(), push: vi.fn(), authLogin: vi.fn(), deviceComplete: vi.fn(), platformComplete: vi.fn(), nativeHandoff: vi.fn(),
-    platform: { status: 'ready' as 'ready' | 'loading' | 'error' | 'disabled', session: null }, authProps: vi.fn(),
+    platform: { status: 'ready' as 'ready' | 'loading' | 'error' | 'disabled', session: null as null | { authority: string; subject: string; sessionId: string } }, authProps: vi.fn(),
 }));
 vi.mock('react-native-quick-base64', () => ({}));
 vi.mock('@/theme.css', () => ({}));
@@ -62,7 +63,7 @@ async function rerenderRoot() { await act(async () => { renderer.update(React.cr
 function navigate(path: string) { f.path = path; browser().location.href = 'https://work.example.test/work' + path; browser().location.pathname = '/work' + path; }
 beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('__DEV__', false); vi.useFakeTimers();
-    f.path = '/'; f.mode = undefined; f.platformFlow = false; f.legacyFlow = false; f.platform.status = 'ready';
+    f.path = '/'; f.mode = undefined; f.platformFlow = false; f.legacyFlow = false; f.platform.status = 'ready'; f.platform.session = null;
     [f.getCredentials, f.syncRestore, f.reload, f.assign, f.replace, f.push, f.authLogin, f.deviceComplete, f.platformComplete, f.nativeHandoff, f.authProps].forEach(fn => fn.mockReset());
     f.getCredentials.mockResolvedValue(f.credentials); f.syncRestore.mockResolvedValue(undefined); f.authLogin.mockResolvedValue(undefined);
     f.deviceComplete.mockResolvedValue(f.credentials); f.platformComplete.mockResolvedValue(undefined); f.nativeHandoff.mockResolvedValue(null);
@@ -76,11 +77,14 @@ describe('actual root runtime ownership', () => {
         expect(f.getCredentials).not.toHaveBeenCalled(); expect(f.syncRestore).not.toHaveBeenCalled(); expect(f.authProps).toHaveBeenCalledWith(null);
     });
     it('keeps settings navigation in the platform runtime without loading a device identity', async () => {
+        f.platform.session = { authority: 'https://accounts.example.test', subject: '42', sessionId: 'session-one' };
         await renderRoot();
         for (const path of ['/settings', '/settings/appearance', '/settings/language', '/settings/account', '/']) {
             navigate(path); await rerenderRoot();
             expect(f.reload).not.toHaveBeenCalled(); expect(f.getCredentials).not.toHaveBeenCalled(); expect(f.syncRestore).not.toHaveBeenCalled();
             expect(renderer!.root.findAllByType('DeviceSidebar')).toHaveLength(0);
+            expect(renderer!.root.findAllByType('PlatformNavigationLayout')).toHaveLength(1);
+            expect(renderer!.root.findByType('PlatformNavigationProvider').props.scope).toBe(JSON.stringify(['https://accounts.example.test', '42', 'session-one']));
         }
     });
     it('boots an explicit device route with the preserved legacy identity', async () => {

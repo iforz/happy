@@ -1,5 +1,7 @@
+vi.mock('./PlatformNavigation', () => ({ usePlatformNavigationRegistration: vi.fn() }));
+vi.mock('./PlatformChatContent', async () => { const R = await import('react'); return { PlatformChatContent: (p: any) => R.createElement('PlatformChatContent', p, ...p.turns.map((turn: any, i: number) => R.createElement('Text', { key: i }, turn.user + ' ' + turn.assistant + ' ' + turn.status))) }; });
 vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
-vi.mock('./PlatformConversationShell', async () => { const R = await import('react'); return { PlatformConversationShell: (p: any) => R.createElement('View', null, p.actions, p.sidebar(() => {}), R.createElement('Pressable', { onPress: p.onNew, disabled: p.busy }, R.createElement('Text', null, p.newLabel)), p.children, p.composer) }; });
+vi.mock('./PlatformConversationShell', async () => { const R = await import('react'); return { PlatformConversationShell: (p: any) => R.createElement('View', null, p.actions, p.sidebar?.(() => {}), R.createElement('Pressable', { onPress: p.onNew, disabled: p.busy }, R.createElement('Text', null, p.newLabel)), p.children, p.composer) }; });
 vi.mock('@/components/Item', async () => { const R = await import('react'); return { Item: (p: any) => R.createElement('Pressable', { onPress: p.onPress, disabled: p.disabled }, R.createElement('Text', null, p.title)) }; });
 vi.mock('@/components/markdown/MarkdownView', async () => { const R = await import('react'); return { MarkdownView: (p: any) => R.createElement('Text', null, p.markdown) }; });
 vi.mock('@/components/layout', () => ({ layout: { maxWidth: 800 } }));
@@ -8,11 +10,11 @@ import * as React from 'react';
 // @ts-expect-error upstream does not install renderer types
 import { act, create } from 'react-test-renderer';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-const f = vi.hoisted(() => ({ draft: '', id: 0, storage: new Map<string, string>(), keys: new Map<string, string>(), logout: vi.fn(async () => {}), refresh: vi.fn(async () => {}), openURL: vi.fn(async () => {}) }));
+const f = vi.hoisted(() => ({ draft: '', id: 0, storage: new Map<string, string>(), keys: new Map<string, string>(), logout: vi.fn(async () => {}), refresh: vi.fn(async () => {}), push: vi.fn(), params: {} as { newChat?: string; conversationId?: string }, openURL: vi.fn(async () => {}) }));
 vi.mock('react-native', () => ({ View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', Linking: { openURL: f.openURL } }));
 vi.mock('react-native-unistyles', () => ({ useUnistyles: () => ({ theme: { colors: { text: 'black', textSecondary: 'gray', groupped: { background: 'white' } } } }) }));
 vi.mock('react-native-mmkv', () => ({ MMKV: class { getString(key: string) { return f.storage.get(key); } set(key: string, value: string) { f.storage.set(key, value); } } }));
-vi.mock('expo-router', async () => { const R = await import('react'); return { useRouter: () => ({ push: vi.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: (callback: () => void) => R.useEffect(callback, [callback]) }; });
+vi.mock('expo-router', async () => { const R = await import('react'); return { useRouter: () => ({ push: f.push }), useLocalSearchParams: () => f.params, useFocusEffect: (callback: () => void) => R.useEffect(callback, [callback]) }; });
 vi.mock('expo-crypto', () => ({ randomUUID: () => `00000000-0000-4000-8000-${String(++f.id).padStart(12, '0')}` }));
 vi.mock('@/auth/AuthContext', () => ({ useAuth: () => ({ credentials: null }) }));
 vi.mock('@/sync/serverConfig', () => ({ getServerUrl: () => 'https://work.example' }));
@@ -20,7 +22,8 @@ vi.mock('@/text', () => ({ getCurrentLanguage: () => 'en' }));
 vi.mock('@/encryption/libsodium', () => ({ decryptSecretBox: (value: Uint8Array) => JSON.parse(new TextDecoder().decode(value)) }));
 vi.mock('@/components/AgentInput', async () => { const R = await import('react'); return { AgentInput: R.forwardRef((props: any, ref: any) => { R.useImperativeHandle(ref, () => ({ getText: () => f.draft, setTextAndSelection: (value: string) => { f.draft = value; } })); return R.createElement('AgentInput', props); }) }; });
 vi.mock('./PlatformSessionProvider', () => ({ usePlatformSession: () => ({ logout: f.logout, refresh: f.refresh }) }));
-import { TokenHubConversation } from './TokenHubConversation';
+import { TokenHubConversation, PlatformHomeConversation } from './TokenHubConversation';
+import { usePlatformNavigationRegistration } from './PlatformNavigation';
 const ConversationComponent = TokenHubConversation as React.ComponentType<NonNullable<Parameters<typeof TokenHubConversation>[0]>>;
 import { platformAccountScope, type PlatformSession } from './platformSession';
 import type { PlatformConversation } from './platformConversationClient';
@@ -53,16 +56,8 @@ function server(url: string, init: RequestInit): Promise<Response> {
 const composer = () => renderer.root.findByType('AgentInput');
 const text = () => JSON.stringify(renderer.toJSON());
 function button(label: string) { return renderer.root.findAllByType('Pressable').find((node: any) => (node.props.accessibilityLabel === label || node.props.children?.props?.children === label))!; }
-async function press(label: string) {
-    if (label === 'Refresh' || label === 'Sign out of Work') {
-        await act(async () => { button('Settings').props.onPress(); });
-        await act(async () => { button(label === 'Refresh' ? 'Reload models' : label).props.onPress(); });
-        if (label === 'Refresh') await act(async () => { button('Return to Work').props.onPress(); });
-        return;
-    }
-    await act(async () => { button(label).props.onPress(); });
-}
-async function render(value = session, startNew = false) { await act(async () => { renderer = create(React.createElement(ConversationComponent, { platformSession: value, startNew })); }); }
+async function press(label: string) { await act(async () => { button(label).props.onPress(); }); }
+async function render(value = session, startNew = false, initialConversationId?: string) { await act(async () => { renderer = create(React.createElement(ConversationComponent, { platformSession: value, startNew, initialConversationId })); }); }
 async function send(value: string) { f.draft = value; await act(async () => composer().props.onChangeText(value)); await act(async () => { composer().props.onSend(); }); }
 function legacy() {
     const scope = platformAccountScope(session);
@@ -72,7 +67,7 @@ function legacy() {
     return new Map(f.storage);
 }
 beforeEach(() => {
-    f.draft = ''; f.id = 0; f.storage.clear(); f.keys.clear(); f.logout.mockClear(); f.refresh.mockClear(); f.openURL.mockClear(); records = new Map(); browser = new EventTarget();
+    f.draft = ''; f.id = 0; f.params = {}; f.push.mockClear(); f.storage.clear(); f.keys.clear(); f.logout.mockClear(); f.refresh.mockClear(); f.openURL.mockClear(); records = new Map(); browser = new EventTarget();
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('window', { location: { origin: 'https://work.example' }, addEventListener: browser.addEventListener.bind(browser), removeEventListener: browser.removeEventListener.bind(browser) });
     vi.stubGlobal('localStorage', { getItem: (key: string) => f.keys.get(key) ?? null, setItem: (key: string, value: string) => f.keys.set(key, value) });
@@ -270,33 +265,40 @@ it('keeps existing server and browser conversations intact when basic chat is di
 });
 
 
-it('shows a model selector even with one model, and changes models without device-agent menus', async () => {
-    await render();
-    expect(button('Model: Qwen')).toBeTruthy();
-    await press('Model: Qwen');
-    expect(button('Qwen').props.accessibilityState.checked).toBe(true);
-    await press('Qwen');
+it('uses the original model-only AgentInput picker, validates selections and sends the selected model', async () => {
+    await render(); expect(composer().props.modelPickerOnly).toBe(true); expect(composer().props.zenMode).toBe(true);
+    expect(composer().props.availableModels.map((option: any) => option.key)).toEqual(['qwen-current']);
+    await act(async () => composer().props.onModelModeChange({ key: 'forged-model' })); expect(composer().props.modelMode.key).toBe('qwen-current');
     fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
         ? Promise.resolve(json({ mode: 'real', billable: true, models: [{ id: 'qwen-current', name: 'Qwen' }, { id: 'deepseek-current', name: 'DeepSeek' }] })) : server(url, init));
-    await press('Refresh');
-    await press('Model: Qwen'); await press('DeepSeek');
-    expect(composer().props.modelMode.key).toBe('deepseek-current');
-    expect(button('Model: DeepSeek')).toBeTruthy();
-    await send('use the selected model');
-    const request = fetcher.mock.calls.find(([url]) => url.endsWith('/stream'))!;
-    expect(JSON.parse(request[1].body).model).toBe('deepseek-current');
+    await press('Refresh'); await act(async () => composer().props.onModelModeChange({ key: 'deepseek-current' }));
+    expect(composer().props.modelMode.key).toBe('deepseek-current'); await send('use the selected model');
+    const request = fetcher.mock.calls.find(([url]) => url.endsWith('/stream'))!; expect(JSON.parse(request[1].body).model).toBe('deepseek-current');
+});
+it('uses the native settings route without creating inline settings or replacing the composer', async () => {
+    await render(); const originalComposer = composer(); await act(async () => { f.draft = 'unfinished message'; originalComposer.props.onChangeText(f.draft); });
+    await press('Settings'); expect(f.push).toHaveBeenCalledWith('/settings'); expect(composer()).toBe(originalComposer);
+    expect(text()).not.toContain('Return to Work'); expect(text()).not.toContain('My subscriptions'); expect(f.draft).toBe('unfinished message');
+});
+it('opens the requested account history instead of the first list item', async () => {
+    const secondId = 'a7344cfb-b237-445d-8c19-53fd24db9f2a';
+    records.set(id, record()); records.set(secondId, { ...record(), id: secondId, turns: [{ ...record().turns[0], user: 'selected older conversation' }] });
+    await render(session, false, secondId); expect(text()).toContain('selected older conversation'); expect(text()).not.toContain('server-only question');
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/conversations/' + secondId))).toBe(true);
+});
+it('does not replace an explicitly requested missing conversation with a different account record', async () => {
+    records.set(id, record()); await render(session, false, 'a7344cfb-b237-445d-8c19-53fd24db9f2a');
+    expect(text()).toContain('no longer exists on the server'); expect(composer().props.blockSend).toBe(true); expect(text()).not.toContain('saved server answer');
 });
 
-it('opens real account and subscription pages and keeps the composer mounted across settings', async () => {
-    await render();
-    const originalComposer = composer();
-    await act(async () => { f.draft = 'unfinished message'; originalComposer.props.onChangeText(f.draft); });
-    await press('Personal center'); expect(f.openURL).toHaveBeenLastCalledWith('https://accounts.example.test/profile');
-    await press('Subscription center'); expect(f.openURL).toHaveBeenLastCalledWith('https://accounts.example.test/purchase');
-    await press('Settings');
-    expect(text()).toContain('My subscriptions'); expect(text()).toContain('Reload models');
-    expect(composer()).toBe(originalComposer);
-    await press('My subscriptions'); expect(f.openURL).toHaveBeenLastCalledWith('https://accounts.example.test/subscriptions');
-    await press('Return to Work');
-    expect(f.draft).toBe('unfinished message'); expect(composer().props.isSendDisabled).toBe(false);
+it('publishes cloud history to the shared sidebar and remounts Home on conversation query changes', async () => {
+    const secondId = 'a7344cfb-b237-445d-8c19-53fd24db9f2a';
+    records.set(id, record()); records.set(secondId, { ...record(), id: secondId, turns: [{ ...record().turns[0], user: 'selected older conversation' }] });
+    f.params = { conversationId: id }; await act(async () => { renderer = create(React.createElement(PlatformHomeConversation, { session })); });
+    expect(renderer.root.findByType('PlatformChatContent').props.conversationId).toBe(id);
+    f.params = { conversationId: secondId }; await act(async () => { renderer.update(React.createElement(PlatformHomeConversation, { session })); });
+    expect(renderer.root.findByType('PlatformChatContent').props.conversationId).toBe(secondId);
+    expect(vi.mocked(usePlatformNavigationRegistration)).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: secondId, busy: false, items: expect.arrayContaining([expect.objectContaining({ id: secondId })]) }));
+    f.params = { conversationId: secondId, newChat: 'fresh-intent' }; await act(async () => { renderer.update(React.createElement(PlatformHomeConversation, { session })); });
+    expect(renderer.root.findByType('PlatformChatContent').props.conversationId).toBe('new'); expect(composer().props.blockSend).toBe(false);
 });
