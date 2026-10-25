@@ -1,10 +1,16 @@
 import * as React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import { v5 as uuidv5 } from 'uuid';
 import { MMKV } from 'react-native-mmkv';
 import { useUnistyles } from 'react-native-unistyles';
+import { PlatformConversationShell } from './PlatformConversationShell';
+import { Ionicons } from '@expo/vector-icons';
+import { Item } from '@/components/Item';
+import { MarkdownView } from '@/components/markdown/MarkdownView';
+import { Typography } from '@/constants/Typography';
+import { layout } from '@/components/layout';
 import { AgentInput } from '@/components/AgentInput';
 import type { MultiTextInputHandle } from '@/components/MultiTextInput';
 import { getServerUrl } from '@/sync/serverConfig';
@@ -37,7 +43,7 @@ function requestFailure(cause: unknown): string {
 
 /** Cookie account history never writes or automatically imports the old browser vault. */
 export function PlatformAccountConversation({ session, startNew = false }: { session: PlatformSession; startNew?: boolean }) {
-    const router = useRouter(), platform = usePlatformSession(), { theme } = useUnistyles();
+    const platform = usePlatformSession(), { theme } = useUnistyles();
     const server = getServerUrl(), scope = platformAccountScope(session, server);
     const client = React.useMemo(() => createWorkMockClient({ baseUrl: server, requireRealCatalog: true, tokenProvider: async () => null,
         fetch: tokenHubFetch, platformSession: { csrf: session.csrf, origin: window.location.origin } }), [server, session.csrf]);
@@ -54,6 +60,7 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
     const [local, setLocal] = React.useState<Conversation[]>([]);
     const [catalog, setCatalog] = React.useState<WorkModelCatalog | null>(null), [model, setModel] = React.useState('');
     const [catalogError, setCatalogError] = React.useState('');
+    const [chatDisabled, setChatDisabled] = React.useState(false);
     const [loading, setLoading] = React.useState(true), [historyLoading, setHistoryLoading] = React.useState(false);
     const [busy, setBusy] = React.useState(false), [mutating, setMutating] = React.useState(false), [engaged, setEngaged] = React.useState(false);
     const [draft, setDraft] = React.useState(''), [error, setError] = React.useState(''), [historyError, setHistoryError] = React.useState(''), [detailError, setDetailError] = React.useState(''), [localError, setLocalError] = React.useState('');
@@ -142,11 +149,12 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
             void client.getCatalog(request.signal).then(value => {
                 requireRealCatalog(value);
                 if (!currentEpoch(generation)) return;
-                setCatalogError(''); setCatalog(value); setModel(previous => previous || value.models[0]?.id || '');
+                setChatDisabled(false); setCatalogError(''); setCatalog(value); setModel(previous => previous || value.models[0]?.id || '');
             }).catch(cause => {
                 if (!currentEpoch(generation) || request.signal.aborted) return;
                 if (cause instanceof WorkMockError && cause.kind === 'authentication') { authenticationFailed(); return; }
                 const diagnostic = cause instanceof WorkMockError ? cause.diagnostic : undefined;
+                setChatDisabled(diagnostic === 'work_gateway_disabled');
                 setCatalogError(t(diagnostic === 'work_gateway_disabled' ? 'catalogDisabled'
                     : diagnostic === 'work_gateway_unavailable' ? 'catalogServiceUnavailable'
                     : diagnostic === 'work_authority_unavailable' ? 'catalogAuthorityUnavailable'
@@ -240,23 +248,23 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
     }
     const disabled = !engaged || !validModel || loading || busy || mutating || historyLoading || selection?.kind === 'local' || serverStreaming || !!missingConversation || (selection?.kind === 'cloud' && !current);
     const link = (label: string, action: () => void, disable = false) => <Pressable accessibilityRole="button" disabled={disable} onPress={action} style={{ padding: 10 }}><Text style={{ color: theme.colors.text }}>{label}</Text></Pressable>;
-    return <View style={{ flex: 1, backgroundColor: theme.colors.groupped.background, padding: 16, gap: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <Text accessibilityRole="header" style={{ fontSize: 24, fontWeight: '600', color: theme.colors.text, flex: 1 }}>{t('title')}</Text>
-            {link(t('agents'), () => router.push('/device-agents' as any))}{link(t('signOutWork'), logout)}
-        </View>
-        <Text style={{ color: theme.colors.textSecondary }}>{t('cloudDescription')}</Text>
-        <Text style={{ color: theme.colors.textSecondary }}>{t('platformHistory')}</Text>
-        <Text style={{ color: theme.colors.textSecondary }}>{t('accountHistory')}</Text>
-        <ScrollView horizontal style={{ maxHeight: 45 }}>
-            {link(t('newChat'), newConversation, busy || mutating)}
-            {conversations.map(item => <Pressable key={item.id} accessibilityRole="button" disabled={busy || mutating} onPress={() => selectCloud(item.id)} style={{ padding: 10 }}><Text numberOfLines={1} style={{ maxWidth: 180, color: theme.colors.text }}>{item.title || t('newChat')}</Text></Pressable>)}
-        </ScrollView>
-        {local.length ? <View><Text style={{ color: theme.colors.textSecondary }}>{t('localHistory')}</Text><ScrollView horizontal style={{ maxHeight: 45 }}>
-            {local.map(item => <Pressable key={item.id} accessibilityRole="button" disabled={busy || mutating} onPress={() => { if (busy || mutating) return; detailVersion.current++; choose({ kind: 'local', id: item.id }); setCurrent(null); setHistoryLoading(false); setModel(item.model); setError(''); resetComposer(); }} style={{ padding: 10 }}><Text numberOfLines={1} style={{ maxWidth: 180, color: theme.colors.text }}>{item.turns[0]?.user || t('newChat')}</Text></Pressable>)}
-        </ScrollView></View> : null}
+    const sidebar = (close: () => void) => <><ScrollView style={{ flex: 1 }}>
+        {conversations.map(item => <Item key={item.id} title={item.title || t('newChat')} selected={selection?.kind === 'cloud' && selection.id === item.id} showChevron={false} disabled={busy || mutating} onPress={() => { selectCloud(item.id); close(); }} />)}
+        {local.length ? <View><Text style={{ padding: 16, color: theme.colors.textSecondary, ...Typography.default() }}>{t('localHistory')}</Text>
+            {local.map(item => <Item key={item.id} title={item.turns[0]?.user || t('newChat')} showChevron={false} disabled={busy || mutating} onPress={() => { if (busy || mutating) return; detailVersion.current++; choose({ kind: 'local', id: item.id }); close(); setCurrent(null); setHistoryLoading(false); setModel(item.model); setError(''); resetComposer(); }} />)}
+        </View> : null}
+    </ScrollView><Item title={t('reloadHistory')} showChevron={false} disabled={busy || mutating} onPress={() => { setError(''); setReload(value => value + 1); }} /><Item title={t('signOutWork')} showChevron={false} onPress={logout} /></>;
+    const input = <AgentInput key={scope} ref={composer} initialValue="" placeholder={t('placeholder')} onChangeText={setDraft} onSend={() => { void send(); }}
+        availableModels={(catalog?.models || []).map(item => ({ key: item.id, name: item.name, description: null }))}
+        modelMode={validModel ? { key: model, name: catalog!.models.find(item => item.id === model)!.name, description: null } : null}
+        onModelModeChange={option => { if (!busy && !mutating && selectedModelAllowed(catalog, option.key)) setModel(option.key); }}
+        autocompletePrefixes={[]} autocompleteSuggestions={async () => []} isSendDisabled={disabled || !draft.trim()} blockSend={disabled}
+        isSending={busy} showAbortButton={busy && !!activeStream.current} onAbort={() => activeStream.current?.abort()} showStatusDetails={false} />;
+    return <PlatformConversationShell title={shown?.turns[0]?.user || t('newChat')} sidebar={sidebar} composer={input} actions={selection?.kind === 'cloud' && current && !missingConversation ? <Pressable accessibilityRole="button" accessibilityLabel={t('deleteConversation')} disabled={busy || mutating || serverStreaming} onPress={() => setConfirmation({ kind: 'delete', id: current.id })} style={{ padding: 12 }}><Ionicons name="trash-outline" size={22} color={theme.colors.textSecondary} /></Pressable> : null} newLabel={t('newChat')} historyLabel={t('history')} onNew={newConversation} busy={busy || mutating}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
+       <View style={{ width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', padding: 24, gap: 16 }}>
         {localCurrent ? <View><Text style={{ color: theme.colors.textSecondary }}>{t('localOnly')}</Text>{link(t('importConversation'), () => setConfirmation({ kind: 'import', id: localCurrent.id }), mutating)}</View> : null}
-        {selection?.kind === 'cloud' && current && !missingConversation ? link(t('deleteConversation'), () => setConfirmation({ kind: 'delete', id: current.id }), busy || mutating || serverStreaming) : null}
+
         {confirmation ? <View accessibilityRole="alert" style={{ gap: 8 }}>
             <Text style={{ color: theme.colors.text }}>{t(confirmation.kind === 'import' ? 'importConfirm' : 'deleteConfirm')}</Text>
             <Text selectable style={{ color: theme.colors.textSecondary }}>{server} · {session.authority} · {session.subject}</Text>
@@ -264,32 +272,20 @@ export function PlatformAccountConversation({ session, startNew = false }: { ses
             {link(t('dismiss'), () => setConfirmation(null), mutating)}
         </View> : null}
         {loading ? <Text style={{ color: theme.colors.textSecondary }}>{t('loading')}</Text> : null}
-        {historyLoading ? <Text style={{ color: theme.colors.textSecondary }}>{t('historyLoading')}</Text> : null}
+        {!chatDisabled && historyLoading ? <Text style={{ color: theme.colors.textSecondary }}>{t('historyLoading')}</Text> : null}
         {!loading && catalog && !catalog.models.length ? <Text style={{ color: theme.colors.textSecondary }}>{t('empty')}</Text> : null}
-        {[error, catalogError, historyError, detailError, localError].filter(Boolean).map((message, index) => <Text key={index} accessibilityRole="alert" style={{ color: theme.colors.text }}>{message}</Text>)}
-        {!loading && !validModel && model ? <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>{t('unavailable')}</Text> : null}
-        {serverStreaming && !busy ? <Text style={{ color: theme.colors.textSecondary }}>{t('serverStreaming')}</Text> : null}
-        {link(t('reloadHistory'), () => { if (!busy && !mutating) { setError(''); setReload(value => value + 1); } }, busy || mutating)}
-        {catalog?.models.length ? <View style={{ gap: 6 }}><Text style={{ color: theme.colors.textSecondary }}>{t('models')}</Text><ScrollView horizontal style={{ maxHeight: 48 }} contentContainerStyle={{ gap: 8 }}>
-            {catalog.models.map(item => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: model === item.id, disabled: busy || mutating }} disabled={busy || mutating}
-                onPress={() => { if (selectedModelAllowed(catalog, item.id)) setModel(item.id); }} style={{ padding: 10, borderWidth: 1, borderRadius: 8, borderColor: theme.colors.textSecondary, backgroundColor: model === item.id ? theme.colors.surfacePressed : 'transparent' }}>
-                <Text style={{ color: theme.colors.text, fontWeight: model === item.id ? '600' : '400' }}>{item.name}</Text>
-            </Pressable>)}
-        </ScrollView></View> : null}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 16, paddingVertical: 12 }}>
+        {[error, catalogError, ...(!chatDisabled ? [historyError, detailError, localError] : [])].filter(Boolean).map((message, index) => <Text key={index} accessibilityRole="alert" style={{ color: theme.colors.text }}>{message}</Text>)}
+        {!chatDisabled && !loading && !validModel && model ? <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>{t('unavailable')}</Text> : null}
+        {!chatDisabled && serverStreaming && !busy ? <Text style={{ color: theme.colors.textSecondary }}>{t('serverStreaming')}</Text> : null}
+        <View style={{ gap: 24, paddingVertical: 12 }}>
             {shown?.turns.map((turn, index) => <View key={'id' in turn ? String(turn.id) : index} style={{ gap: 8 }}>
-                <Text style={{ fontWeight: '600', color: theme.colors.text }}>{t('user')}</Text><Text selectable style={{ color: theme.colors.text }}>{turn.user}</Text>
-                <Text style={{ fontWeight: '600', color: theme.colors.text }}>{t('assistant')}</Text><Text selectable style={{ color: theme.colors.text }}>{turn.assistant}</Text>
+                <Text style={{ fontWeight: '600', color: theme.colors.text }}>{t('user')}</Text><View style={{ alignSelf: 'flex-end', maxWidth: '90%', padding: 16, borderRadius: 16, backgroundColor: theme.colors.groupped.background }}><Text selectable style={{ color: theme.colors.text, fontSize: 16, ...Typography.default() }}>{turn.user}</Text></View>
+                <Text style={{ fontWeight: '600', color: theme.colors.text }}>{t('assistant')}</Text><MarkdownView markdown={turn.assistant} />
                 <Text style={{ color: theme.colors.textSecondary }}>{t(missingConversation && selection?.kind === 'cloud' ? 'unsaved' : turn.status === 'streaming' ? 'streaming' : turn.status === 'complete' ? 'complete' : turn.status === 'cancelled' ? 'cancelled' : 'failed')}</Text>
                 {turn.usage ? <Text style={{ color: theme.colors.textSecondary }}>{t('inputTokens')}: {turn.usage.inputTokens} · {t('outputTokens')}: {turn.usage.outputTokens} · {turn.usage.model}</Text> : null}
             </View>)}
-        </ScrollView>
-        <AgentInput key={scope} ref={composer} initialValue="" placeholder={t('placeholder')} onChangeText={setDraft} onSend={() => { void send(); }}
-            availableModels={(catalog?.models || []).map(item => ({ key: item.id, name: item.name, description: null }))}
-            modelMode={validModel ? { key: model, name: catalog!.models.find(item => item.id === model)!.name, description: null } : null}
-            onModelModeChange={option => { if (!busy && !mutating && selectedModelAllowed(catalog, option.key)) setModel(option.key); }}
-            autocompletePrefixes={[]} autocompleteSuggestions={async () => []} isSendDisabled={disabled || !draft.trim()} blockSend={disabled}
-            isSending={busy} showAbortButton={busy && !!activeStream.current} onAbort={() => activeStream.current?.abort()} showStatusDetails={false} />
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>{t('records')}</Text>
-    </View>;
+        </View>
+       </View>
+      </ScrollView>
+    </PlatformConversationShell>;
 }

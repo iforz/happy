@@ -1,3 +1,9 @@
+vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
+vi.mock('./PlatformConversationShell', async () => { const R = await import('react'); return { PlatformConversationShell: (p: any) => R.createElement('View', null, p.actions, p.sidebar(() => {}), R.createElement('Pressable', { onPress: p.onNew, disabled: p.busy }, R.createElement('Text', null, p.newLabel)), p.children, p.composer) }; });
+vi.mock('@/components/Item', async () => { const R = await import('react'); return { Item: (p: any) => R.createElement('Pressable', { onPress: p.onPress, disabled: p.disabled }, R.createElement('Text', null, p.title)) }; });
+vi.mock('@/components/markdown/MarkdownView', async () => { const R = await import('react'); return { MarkdownView: (p: any) => R.createElement('Text', null, p.markdown) }; });
+vi.mock('@/components/layout', () => ({ layout: { maxWidth: 800 } }));
+vi.mock('@/constants/Typography', () => ({ Typography: { default: () => ({}) } }));
 import * as React from 'react';
 // @ts-expect-error upstream does not install renderer types
 import { act, create } from 'react-test-renderer';
@@ -46,7 +52,7 @@ function server(url: string, init: RequestInit): Promise<Response> {
 }
 const composer = () => renderer.root.findByType('AgentInput');
 const text = () => JSON.stringify(renderer.toJSON());
-function button(label: string) { return renderer.root.findAllByType('Pressable').find((node: any) => node.props.children?.props?.children === label)!; }
+function button(label: string) { return renderer.root.findAllByType('Pressable').find((node: any) => (node.props.accessibilityLabel === label || node.props.children?.props?.children === label))!; }
 async function press(label: string) { await act(async () => { button(label).props.onPress(); }); }
 async function render(value = session, startNew = false) { await act(async () => { renderer = create(React.createElement(ConversationComponent, { platformSession: value, startNew })); }); }
 async function send(value: string) { f.draft = value; await act(async () => composer().props.onChangeText(value)); await act(async () => { composer().props.onSend(); }); }
@@ -100,16 +106,16 @@ it('new platform sends persist stable IDs and replace optimistic content with se
     expect(f.storage.size).toBe(0); expect(f.keys.size).toBe(0);
 });
 it('requires delete confirmation and never deletes a browser copy', async () => {
-    const before = legacy(); records.set(id, record()); await render(); await press('Delete account conversation');
+    const before = legacy(); records.set(id, record()); await render(); await press('Delete conversation');
     expect(fetcher.mock.calls.some(([, init]) => init.method === 'DELETE')).toBe(false);
     await press('Cancel'); expect(records.has(id)).toBe(true);
-    await press('Delete account conversation'); await press('Confirm delete');
+    await press('Delete conversation'); await press('Confirm delete');
     expect(records.has(id)).toBe(false); expect(f.storage).toEqual(before); expect(text()).toContain('private browser-only question');
 });
 it('keeps previous cloud and local records when list refresh fails', async () => {
     legacy(); records.set(id, record()); await render();
     fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/conversations') ? Promise.resolve(new Response('', { status: 503 })) : server(url, init));
-    await press('Reload history and models');
+    await press('Refresh');
     expect(text()).toContain('saved server answer'); expect(text()).toContain('private browser-only question');
     expect(text()).toContain('Account history could not be refreshed');
 });
@@ -118,7 +124,7 @@ it('keeps a remote streaming turn in progress rather than converting it into a l
     expect(text()).toContain('server is still processing'); expect(text()).not.toContain('Request failed');
     expect(composer().props.blockSend).toBe(true); await send('do not start second inference');
     expect(fetcher.mock.calls.some(([url]) => url.endsWith('/stream'))).toBe(false);
-    records.set(id, record()); await press('Reload history and models'); expect(composer().props.blockSend).toBe(false);
+    records.set(id, record()); await press('Refresh'); expect(composer().props.blockSend).toBe(false);
 });
 it('reconciles an aborted stream using a fresh read and never retries inference', async () => {
     fetcher.mockImplementation(async (url: string, init: RequestInit) => {
@@ -203,7 +209,7 @@ it('a late list response cannot resurrect a confirmed deleted account conversati
     records.set(id, record()); await render();
     let resolve!: (response: Response) => void;
     fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/conversations') ? new Promise<Response>(done => { resolve = done; }) : server(url, init));
-    await press('Reload history and models'); await press('Delete account conversation'); await press('Confirm delete');
+    await press('Refresh'); await press('Delete conversation'); await press('Confirm delete');
     await act(async () => resolve(json({ conversations: [{ id, model: 'qwen-current', title: 'server-only question', updatedAt: 10, lastStatus: 'complete' }] })));
     expect(records.has(id)).toBe(false); expect(text()).not.toContain('server-only question');
 });
@@ -213,13 +219,16 @@ it('explains disabled basic chat and clears its error when models recover on for
     fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
         ? Promise.resolve(new Response(JSON.stringify({ code: 'work_gateway_disabled', error: 'private upstream detail' }), { status: 503, headers: { 'content-type': 'application/json' } })) : server(url, init));
     await render();
-    expect(text()).toContain('select a group and models in TokenHub Work settings');
+    expect(text()).toContain('Chat is not enabled yet.');
+    for (const copy of ['Models and access come from', 'New conversations are saved', 'Account conversations', 'Device agents']) expect(text()).not.toContain(copy);
+    expect(text()).not.toContain('Device agents'); expect(text()).toContain('Sign out of Work');
     expect(text()).not.toContain('private upstream detail');
     expect(composer().props.blockSend).toBe(true);
     await send('must not send'); expect(fetcher.mock.calls.some(([url]) => url.endsWith('/stream'))).toBe(false);
     fetcher.mockImplementation(server);
     await act(async () => { browser.dispatchEvent(new Event('focus')); });
-    expect(text()).not.toContain('TokenHub chat is not enabled');
+    expect(text()).not.toContain('Chat is not enabled yet.');
+    expect(text()).not.toContain('Models and access come from'); expect(text()).not.toContain('Account conversations'); expect(text()).toContain('New conversation');
     expect(composer().props.blockSend).toBe(false);
 });
 it('refreshes login after a catalog authorization expires without enabling sending', async () => {
@@ -228,4 +237,26 @@ it('refreshes login after a catalog authorization expires without enabling sendi
     await render();
     expect(text()).toContain('Your authorization has expired');
     expect(f.refresh).toHaveBeenCalled(); expect(composer().props.blockSend).toBe(true);
+});
+
+
+it('does not hide chat entry points when catalog service failure is temporary or unknown', async () => {
+    fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
+        ? Promise.resolve(new Response(JSON.stringify({ code: 'work_authority_unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } })) : server(url, init));
+    await render();
+    expect(text()).not.toContain('Chat is not enabled yet.');
+    expect(text()).not.toContain('Models and access come from'); expect(text()).not.toContain('Account conversations'); expect(text()).toContain('New conversation');
+    expect(composer().props.blockSend).toBe(true);
+});
+it('keeps existing server and browser conversations intact when basic chat is disabled and reopened', async () => {
+    const before = legacy(); records.set(id, record()); await render();
+    fetcher.mockImplementation((url: string, init: RequestInit) => url.endsWith('/models')
+        ? Promise.resolve(new Response(JSON.stringify({ code: 'work_gateway_disabled' }), { status: 503, headers: { 'content-type': 'application/json' } })) : server(url, init));
+    await press('Refresh');
+    expect(text()).toContain('Chat is not enabled yet.'); expect(composer().props.blockSend).toBe(true);
+    expect(f.storage).toEqual(before); expect(records.get(id)).toEqual(record());
+    fetcher.mockImplementation(server); await press('Refresh');
+    expect(text()).toContain('server-only question'); expect(text()).toContain('private browser-only question');
+    expect(text()).not.toContain('Account conversations'); expect(composer().props.blockSend).toBe(false);
+    expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
 });

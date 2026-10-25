@@ -1,3 +1,9 @@
+vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
+vi.mock('./PlatformConversationShell', async () => { const R = await import('react'); return { PlatformConversationShell: (p: any) => R.createElement('View', null, p.actions, p.sidebar(() => {}), R.createElement('Pressable', { onPress: p.onNew, disabled: p.busy }, R.createElement('Text', null, p.newLabel)), p.children, p.composer) }; });
+vi.mock('@/components/Item', async () => { const R = await import('react'); return { Item: (p: any) => R.createElement('Pressable', { onPress: p.onPress, disabled: p.disabled }, R.createElement('Text', null, p.title)) }; });
+vi.mock('@/components/markdown/MarkdownView', async () => { const R = await import('react'); return { MarkdownView: (p: any) => R.createElement('Text', null, p.markdown) }; });
+vi.mock('@/components/layout', () => ({ layout: { maxWidth: 800 } }));
+vi.mock('@/constants/Typography', () => ({ Typography: { default: () => ({}) } }));
 import * as React from 'react';
 // @ts-expect-error upstream does not install renderer types
 import { act, create } from 'react-test-renderer';
