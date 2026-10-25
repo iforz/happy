@@ -15,7 +15,6 @@ export function PlatformWelcome() {
     return <ScrollView style={{ flex: 1, backgroundColor: theme.colors.groupped.background }} contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <View style={{ maxWidth: 520, width: '100%', gap: 22 }}>
             <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 32, textAlign: 'center' }}>Work</Text>
-            <Text style={{ color: theme.colors.textSecondary, textAlign: 'center' }}>{t('cloudDescription')}</Text>
             {auth.status === 'loading' ? <Text style={{ color: theme.colors.text }}>{t('checkingLogin')}</Text> : null}
             {auth.status === 'ready' && !offline && config.ssoReady && config.showLogin ? <RoundButton title={t('signIn')} action={login} /> : null}
             {auth.status === 'error' || offline || (auth.status === 'ready' && !config.ssoReady) ? <>

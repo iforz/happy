@@ -112,7 +112,7 @@ export const SidebarView = React.memo(() => {
     const auth = useAuth(), pathname = usePathname();
     if (auth.credentials && isTokenHubSessionForUI(auth.credentials.token) && pathname !== '/device-agents') {
         return <View style={[styles.container,{paddingTop:safeArea.top+headerHeight,paddingHorizontal:16,gap:18}]}>
-            {[['title','/'],['agents','/device-agents'],['settings','/settings']].map(([key,url])=><Pressable key={url} accessibilityRole="button" onPress={()=>router.push(url as any)} style={{padding:12}}><Text style={styles.newSessionText}>{workText(key as 'title'|'agents'|'settings')}</Text></Pressable>)}
+            {[['title','/'],['settings','/settings']].map(([key,url])=><Pressable key={url} accessibilityRole="button" onPress={()=>router.push(url as any)} style={{padding:12}}><Text style={styles.newSessionText}>{workText(key as 'title'|'settings')}</Text></Pressable>)}
         </View>;
     }
     return (

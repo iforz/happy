@@ -160,10 +160,8 @@ function LocalTokenHubConversation({ startNew = false }: { startNew?: boolean } 
     return <View style={{flex:1,backgroundColor:theme.colors.groupped.background,padding:16,gap:12}}>
         <View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8}}>
             <Text accessibilityRole="header" style={{fontSize:24,fontWeight:'600',color:theme.colors.text,flex:1}}>{t('title')}</Text>
-            {link(t('agents'),()=>router.push('/device-agents' as any))}
             {link(t('settings'),()=>router.push('/settings'))}
         </View>
-        <Text style={{color:theme.colors.textSecondary}}>{t('cloudDescription')}</Text>
         <ScrollView horizontal style={{maxHeight:45}}>
             {link(t('newChat'),()=>{if(!busy){setSelected('');setDraft('');setError('');composer.current?.setTextAndSelection('',{start:0,end:0});}})}
             {conversations.map(item=><Pressable key={item.id} disabled={busy} onPress={()=>{setSelected(item.id);setModel(item.model);setError('');}} style={{padding:10}}><Text numberOfLines={1} style={{maxWidth:180,color:theme.colors.text}}>{item.turns[0]?.user || t('newChat')}</Text></Pressable>)}

@@ -150,3 +150,9 @@ it('unreadable encrypted history is never overwritten on unmount',async()=>{
     await act(async()=>renderer.unmount());
     expect(f.storage.get(key)).toBe('invalid-ciphertext');
 });
+
+it.each(['en', 'zh-Hans'])('does not show retired account instructions or device entry in legacy chat (%s)', async language => {
+ f.language = language; await render(); const visible = JSON.stringify(renderer.toJSON());
+ for (const removed of ['Models and access come from', '模型与权限来自', 'Device agents', '设备代理']) expect(visible).not.toContain(removed);
+ expect(composer()).toBeDefined();
+});

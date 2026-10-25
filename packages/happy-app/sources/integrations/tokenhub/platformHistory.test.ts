@@ -310,3 +310,11 @@ describe('sign-out intent across real frontend remounts', () => {
         expect(context.session).toBeNull(); expect(f.mount).not.toHaveBeenCalled();
     });
 });
+
+it('signed-out welcome retains login without retired model and device instructions', async () => {
+    f.session = null; await render(account(), true, true);
+    const visible = JSON.stringify(renderer!.toJSON());
+    expect(renderer!.root.findAllByType('RoundButton')).not.toHaveLength(0);
+    for (const removed of ['Models and access come from', '模型与权限来自', 'Device agents', '设备代理', 'Account conversations']) expect(visible).not.toContain(removed);
+    expect(renderer!.root.findAllByType('AgentInput')).toHaveLength(0);
+});
