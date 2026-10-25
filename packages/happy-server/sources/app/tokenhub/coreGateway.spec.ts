@@ -111,3 +111,17 @@ it('preserves full multi-turn roles with the exact selected model and existing a
  expect(f.calls[0].headers['x-work-request-id']).toBe('60a399cd-f49f-4064-8fe6-46d2d6d9c0d0');
  expect(events.some(event=>event.type==='done')).toBe(true);
 });
+
+it('preserves only whitelisted model diagnostics without upstream content or retries', async () => {
+ const transport = vi.fn(async () => new Response(JSON.stringify({error:{type:'work_gateway_disabled',message:'private upstream detail'}}), {status:503}));
+ const gateway = createCoreGateway({env:{TOKENHUB_GATEWAY_MODE:'real',TOKENHUB_UNIFIED_AUTH:'true',TOKENHUB_CORE_GATEWAY_URL:'http://127.0.0.1:8080'},transport});
+ await expect(gateway.models('synthetic-grant',{},new AbortController().signal)).rejects.toMatchObject({status:503,code:'work_gateway_disabled',message:'Core gateway request failed'});
+ expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it.each(['unrecognized_secret', 'work_session_invalid'])('does not expose non-whitelisted upstream error %s', async type => {
+ const transport = vi.fn(async () => new Response(JSON.stringify({error:{type,message:'private upstream detail'}}), {status:503}));
+ const gateway = createCoreGateway({env:{TOKENHUB_GATEWAY_MODE:'real',TOKENHUB_UNIFIED_AUTH:'true',TOKENHUB_CORE_GATEWAY_URL:'http://127.0.0.1:8080'},transport});
+ await expect(gateway.models('synthetic-grant',{},new AbortController().signal)).rejects.toMatchObject({status:503,code:undefined});
+ expect(transport).toHaveBeenCalledTimes(1);
+});

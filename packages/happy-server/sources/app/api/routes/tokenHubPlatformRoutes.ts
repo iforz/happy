@@ -199,7 +199,7 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         request.raw.once('aborted', abort); reply.raw.once('close', abort);
         if (request.raw.aborted || reply.raw.destroyed) abort();
         try { return await gateway!.models(session.record.grant, context(request), controller.signal); }
-        catch (error) { return fail(reply, error instanceof CoreGatewayError ? error.status : 502, 'Platform model catalog unavailable'); }
+        catch (error) { return reply.code(error instanceof CoreGatewayError ? error.status : 502).send({ error: 'Platform model catalog unavailable', ...(error instanceof CoreGatewayError && error.code ? { code: error.code } : {}), platform: true, enabled }); }
         finally { controller.abort(); session.record.streams.delete(controller); request.raw.removeListener('aborted', abort); reply.raw.removeListener('close', abort); }
     });
     // No Happy/device account lookup. Every operation is scoped exclusively to a live
