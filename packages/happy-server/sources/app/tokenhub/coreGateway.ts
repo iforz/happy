@@ -1,3 +1,4 @@
+import { coreDiagnostic } from './coreDiagnostic';
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { z } from 'zod';
@@ -10,7 +11,7 @@ export type CoreEvent = { type: 'delta'; text: string } | { type: 'usage'; reque
     | { type: 'done' } | { type: 'error'; code: string; message: string };
 class CoreReconciliationRequired extends Error {}
 export class CoreGatewayError extends Error {
-    constructor(public readonly status: number) { super('Core gateway request failed'); }
+    constructor(public readonly status: number, public readonly code?: string) { super('Core gateway request failed'); }
 }
 
 export function coreGatewayConfig(env: NodeJS.ProcessEnv = process.env) {
@@ -77,8 +78,11 @@ export function createCoreGateway(dependencies: Dependencies = {}) {
             ...(body ? { body: JSON.stringify(body) } : {}),
         });
         if (!response.ok) {
-            void response.body?.cancel().catch(() => {});
-            throw new CoreGatewayError([400, 401, 402, 403, 409, 429, 503].includes(response.status) ? response.status : 502);
+            let diagnostic: string | undefined;
+            if (!body && response.status === 503) {
+                try { let raw = ''; for await (const chunk of chunks(response, signal, 4096)) raw += chunk; diagnostic = coreDiagnostic(response.status, raw); } catch { /* Bounded diagnostics are optional. */ }
+            } else { void response.body?.cancel().catch(() => {}); }
+            throw new CoreGatewayError([400, 401, 402, 403, 409, 429, 503].includes(response.status) ? response.status : 502, diagnostic);
         }
         return response;
     }
