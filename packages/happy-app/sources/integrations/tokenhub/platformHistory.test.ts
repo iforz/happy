@@ -6,7 +6,7 @@ import type { PlatformSession } from './platformSession';
 
 const f = vi.hoisted(() => ({ server: 'https://work.example.test', local: new Map<string, string>(), history: new Map<string, string>(),
     random: 0, id: 0, draft: '', keyFail: false, historyReadFail: false, historyWrite: vi.fn(), getRandomBytes: vi.fn(), fetch: vi.fn(),
-    tab: new Map<string, string>(), logoutFails: false, reload: vi.fn(), configRefresh: vi.fn(),
+    tab: new Map<string, string>(), cloud: new Map<string, Map<string, any>>(), logoutFails: false, reload: vi.fn(), configRefresh: vi.fn(),
     mount: vi.fn(), unmount: vi.fn(), session: null as PlatformSession | null,
 }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' }, View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView' }));
@@ -40,7 +40,7 @@ vi.mock('@/components/AgentInput', async () => {
         return R.createElement('AgentInput', props);
     }) };
 });
-import { platformHistoryKey } from './platformHistory';
+import { platformHistoryKey, readPlatformHistoryKey } from './platformHistory';
 import { platformAccountScope } from './platformSession';
 import { PlatformHomeConversation } from './TokenHubConversation';
 import { PlatformSessionProvider, usePlatformSession } from './PlatformSessionProvider';
@@ -55,7 +55,7 @@ let browser: EventTarget & { location: { origin: string; href: string; pathname:
 let context: ReturnType<typeof usePlatformSession>;
 function CookieWorkspace({ welcome = false }: { welcome?: boolean }) { context = usePlatformSession(); return context.status === 'ready' && context.session ? React.createElement(PlatformHomeConversation, { session: context.session }) : welcome ? React.createElement(PlatformWelcome) : React.createElement('SignedOut', { status: context.status }); }
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
-async function render(session = account(), provider = false, welcome = false) { await act(async () => { renderer = create(provider ? React.createElement(PlatformSessionProvider, { children: React.createElement(CookieWorkspace, { welcome }) }) : React.createElement(PlatformHomeConversation, { session })); }); }
+async function render(session = account(), provider = false, welcome = false) { if (!provider) f.session = session; await act(async () => { renderer = create(provider ? React.createElement(PlatformSessionProvider, { children: React.createElement(CookieWorkspace, { welcome }) }) : React.createElement(PlatformHomeConversation, { session })); }); }
 const composer = () => renderer!.root.findByType('AgentInput');
 async function send(text: string) { f.draft = text; await act(async () => { composer().props.onChangeText(text); }); await act(async () => { composer().props.onSend(); await new Promise(resolve => setTimeout(resolve, 0)); }); }
 async function close() { if (renderer) await act(async () => { renderer.unmount(); }); renderer = undefined; }
@@ -67,7 +67,7 @@ function seedHistory(value = account()) {
 }
 beforeEach(() => {
     vi.spyOn(Date, 'now').mockReturnValue(now); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubEnv('EXPO_PUBLIC_TOKENHUB_PLATFORM_AUTH', '1');
-    f.server = origin; f.local.clear(); f.tab.clear(); f.history.clear(); f.logoutFails = false; f.reload.mockReset(); f.configRefresh.mockReset(); f.random = 0; f.id = 0; f.draft = ''; f.keyFail = false; f.historyReadFail = false;
+    f.server = origin; f.local.clear(); f.tab.clear(); f.history.clear(); f.cloud.clear(); f.logoutFails = false; f.reload.mockReset(); f.configRefresh.mockReset(); f.random = 0; f.id = 0; f.draft = ''; f.keyFail = false; f.historyReadFail = false;
     f.historyWrite.mockReset(); f.mount.mockClear(); f.unmount.mockClear(); f.getRandomBytes.mockReset(); f.getRandomBytes.mockImplementation((length: number) => new Uint8Array(length).fill(++f.random));
     f.session = account(); local = storage(); browser = Object.assign(new EventTarget(), { location: { origin, href: origin + '/work/', pathname: '/work/', search: '', reload: f.reload }, history: { replaceState: vi.fn((_state: unknown, _title: string, value: string) => { const url = new URL(value, browser.location.href); Object.assign(browser.location, { href: url.href, pathname: url.pathname, search: url.search }); }) } }); page = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browser); vi.stubGlobal('document', page); vi.stubGlobal('localStorage', local);
@@ -76,8 +76,14 @@ beforeEach(() => {
         if (url.endsWith('/session')) return f.session ? json(f.session) : new Response('', { status: 401 });
         if (url.endsWith('/complete')) return json(f.session);
         if (url.endsWith('/logout')) { if (f.logoutFails) return new Response('', { status: 503 }); f.session = null; return json({ ok: true }); }
+        if (!f.session || new Headers(init.headers).get('x-tokenhub-csrf') !== f.session.csrf) return new Response('', { status: 403 });
+        const scope = platformAccountScope(f.session, new URL(url).origin);
+        const records = f.cloud.get(scope) ?? new Map<string, any>(); f.cloud.set(scope, records);
+        if (url.endsWith('/conversations')) return json({ conversations: [...records.values()].map(item => ({ id: item.id, model: item.model, title: item.turns[0]?.user || '', updatedAt: item.updatedAt, lastStatus: item.turns.at(-1)?.status })) });
+        if (url.includes('/conversations/')) { const record = records.get(url.split('/').at(-1)!); return record ? json(record) : new Response('', { status: 404 }); }
         if (url.endsWith('/models')) return json({ mode: 'real', billable: true, models: [{ id: 'synthetic-model', name: 'Synthetic Model' }] });
         const input = JSON.parse(init.body as string);
+        records.set(input.conversationId, { id: input.conversationId, model: input.model, updatedAt: now, turns: [...(records.get(input.conversationId)?.turns || []), { id: input.requestId, user: input.messages.at(-1).content, assistant: 'synthetic answer', status: 'complete' }] });
         return new Response([{ type: 'delta', text: 'synthetic answer' }, { type: 'usage', model: input.model, requestId: input.requestId, inputTokens: 1, outputTokens: 2, mock: false, billable: true, accounting: 'core' }, { type: 'done' }].map(value => JSON.stringify(value)).join('\n'), { headers: { 'content-type': 'application/x-ndjson' } });
     });
     vi.stubGlobal('fetch', f.fetch);
@@ -85,6 +91,12 @@ beforeEach(() => {
 afterEach(async () => { await close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('local-only platform history key', () => {
+    it('reads existing legacy keys without creating or replacing a missing key', () => {
+        const scope = platformAccountScope(account()); expect(readPlatformHistoryKey(scope)).toBeNull();
+        expect(local.setItem).not.toHaveBeenCalled(); expect(f.getRandomBytes).not.toHaveBeenCalled();
+        const key = platformHistoryKey(scope); local.setItem.mockClear();
+        expect(readPlatformHistoryKey(scope)).toBe(key); expect(local.setItem).not.toHaveBeenCalled();
+    });
     it('namespaces data independently by server, authority, issuer and subject', () => {
         const scopes = [platformAccountScope(account()), platformAccountScope(account(), 'https://other-work.example.test'),
             platformAccountScope(account({ authority: 'https://other-accounts.example.test' })), platformAccountScope(account({ issuer: 'other-core' })), platformAccountScope(account({ subject: '99' }))];
@@ -124,11 +136,12 @@ describe('local-only platform history key', () => {
 describe('platform conversation history integration', () => {
     it('works for a fresh seedless account and sends neither data key nor bearer to the gateway', async () => {
         await render(); await send('synthetic first message');
-        const key = f.local.get(keyName(platformAccountScope(account())))!; expect(key).toBeDefined();
-        expect(f.fetch.mock.calls.map(([url]) => url)).toEqual([origin + '/v1/tokenhub/platform/models', origin + '/v1/tokenhub/platform/stream']);
+        expect(f.local.has(keyName(platformAccountScope(account())))).toBe(false);
+        expect(f.fetch.mock.calls.filter(([url]) => url.endsWith('/stream'))).toHaveLength(1);
+        expect(f.fetch.mock.calls.some(([url]) => url.endsWith('/conversations'))).toBe(true);
         for (const [, init] of f.fetch.mock.calls) { expect(init.credentials).toBe('include'); expect(new Headers(init.headers).has('Authorization')).toBe(false); expect(new Headers(init.headers).get('x-tokenhub-csrf')).toBe(account().csrf); }
-        expect(JSON.stringify(f.fetch.mock.calls)).not.toContain(key); expect(JSON.stringify(f.fetch.mock.calls)).not.toMatch(/"secret"|"publicKey"|"signature"/);
-        expect(f.history.get(platformAccountScope(account()))).toBeDefined();
+        expect(JSON.stringify(f.fetch.mock.calls)).not.toMatch(/"secret"|"publicKey"|"signature"/);
+        expect(f.historyWrite).not.toHaveBeenCalled(); expect(f.cloud.get(platformAccountScope(account()))?.size).toBe(1);
     });
     it('restores only the same account and server after reload', async () => {
         await render(); await send('account A saved message'); await close(); await render();
@@ -159,14 +172,14 @@ describe('platform conversation history integration', () => {
         expect(f.history.get(saved.scope)).toBe(ciphertext); expect(f.historyWrite).not.toHaveBeenCalled();
     });
     it('unmounts the actual conversation immediately on explicit logout without deleting its local data', async () => {
-        await render(account(), true); await send('retain encrypted local history');
-        const scope = platformAccountScope(account()), key = f.local.get(keyName(scope));
+        const { scope, key, ciphertext } = seedHistory();
+        await render(account(), true); await send('new account history');
         await act(async () => { await context.logout(); });
         expect(renderer!.root.findAllByType('AgentInput')).toHaveLength(0); expect(context.session).toBeNull();
-        expect(f.local.get(keyName(scope))).toBe(key); expect(f.history.has(scope)).toBe(true);
+        expect(f.local.get(keyName(scope))).toBe(key); expect(f.history.get(scope)).toBe(ciphertext); expect(f.historyWrite).not.toHaveBeenCalled();
         expect(f.fetch.mock.calls.some(([url]) => url.endsWith('/platform/logout'))).toBe(true);
     });
-    it('a local data-key failure is a history warning, not an authentication failure or login request', async () => {
+    it('browser data-key write failure does not block cloud history or trigger legacy login', async () => {
         f.keyFail = true; await render(account(), true);
         expect(context.status).toBe('ready'); expect(context.session).toEqual(account()); expect(composer().props.blockSend).toBe(false);
         await send('ephemeral authorized message'); expect(context.session).toEqual(account()); expect(f.historyWrite).not.toHaveBeenCalled();
@@ -184,13 +197,13 @@ describe('platform conversation history integration', () => {
         await render(account(), true); await send('keep my conversation'); const mounts = f.mount.mock.calls.length;
         await act(async () => { browser.dispatchEvent(new Event('focus')); });
         expect(f.mount.mock.calls.length).toBe(mounts); expect(f.unmount).not.toHaveBeenCalled(); expect(JSON.stringify(renderer!.toJSON())).toContain('keep my conversation');
-        expect(f.fetch.mock.calls.filter(([url]) => url.endsWith('/models'))).toHaveLength(1);
+        expect(f.fetch.mock.calls.filter(([url]) => url.endsWith('/models'))).toHaveLength(2);
     });
     it('replaces the actual conversation on account switch without showing the previous history', async () => {
         await render(account(), true); await send('account A only'); f.session = account({ subject: '99', sessionId: 'account-b', csrf: 'd'.repeat(43) });
         await act(async () => { browser.dispatchEvent(new Event('focus')); });
         expect(context.session?.subject).toBe('99'); expect(JSON.stringify(renderer!.toJSON())).not.toContain('account A only'); expect(f.unmount).toHaveBeenCalledOnce();
-        expect(f.history.get(platformAccountScope(account()))).toBeDefined();
+        expect(f.historyWrite).not.toHaveBeenCalled(); expect(f.cloud.get(platformAccountScope(account()))?.size).toBe(1);
     });
     it('drops the actual conversation immediately on confirmed cookie expiry', async () => {
         await render(account(), true); await send('no stale signed-out content'); f.session = null;

@@ -337,3 +337,42 @@ describe('opt-in real Work gateway client', () => {
     });
 
 });
+
+describe('account conversation routing', () => {
+    const conversationId = 'a695462e-41f4-45f1-9503-45355a79cf11';
+    async function platformSetup() {
+        const fetch = vi.fn<NonNullable<WorkMockClientOptions['fetch']>>().mockImplementation(async url => url.endsWith('/models')
+            ? new Response(JSON.stringify(realCatalog), { headers: { 'content-type': 'application/json' } })
+            : streamResponse(ndjson([realUsage, done])));
+        const tokenProvider = vi.fn(async () => 'never-read-device-token');
+        const client = createWorkMockClient({ baseUrl: 'https://work.example', platformSession: { csrf: 'a'.repeat(43), origin: 'https://work.example' }, tokenProvider, fetch });
+        await client.getCatalog();
+        return { client, fetch, tokenProvider };
+    }
+    it('adds the validated conversation UUID only on the cookie platform stream', async () => {
+        const { client, fetch, tokenProvider } = await platformSetup();
+        await client.stream({ ...realInput, conversationId }, () => {});
+        const [url, request] = fetch.mock.calls[1];
+        expect(url).toBe('https://work.example/v1/tokenhub/platform/stream');
+        expect(JSON.parse(request.body as string)).toEqual({ ...realInput, conversationId });
+        expect(request.headers).not.toHaveProperty('Authorization');
+        expect(request.headers).toMatchObject({ 'x-tokenhub-csrf': 'a'.repeat(43) });
+        expect(request.credentials).toBe('include');
+        expect(tokenProvider).not.toHaveBeenCalled();
+    });
+    it.each(['bad-id', '', '11111111-1111-1111-1111-111111111111', null, 12])('rejects malformed platform conversation ID %s before fetching', async conversationId => {
+        const { client, fetch } = await platformSetup();
+        await expect(client.stream({ ...realInput, conversationId } as any, () => {})).rejects.toMatchObject({ kind: 'invalid_request' });
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+    it('does not change native/device real wire shape even if a caller supplies conversationId', async () => {
+        const { client, fetch } = await realSetup();
+        await client.stream({ ...realInput, conversationId }, () => {});
+        expect(JSON.parse(fetch.mock.calls[1][1].body as string)).toEqual(realInput);
+    });
+    it('does not change the existing mock wire shape', async () => {
+        const { client, fetch } = setup();
+        await client.stream({ ...input, conversationId }, () => {});
+        expect(JSON.parse(fetch.mock.calls[0][1].body as string)).toEqual(input);
+    });
+});

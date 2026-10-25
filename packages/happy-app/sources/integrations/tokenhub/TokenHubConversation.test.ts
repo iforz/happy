@@ -23,7 +23,7 @@ function completion(init:RequestInit){const input=JSON.parse(init.body as string
 async function render(){await act(async()=>{renderer=create(React.createElement(TokenHubConversation))})}
 const composer=()=>renderer.root.findByType('AgentInput');
 async function send(text:string){f.draft=text;await act(async()=>{composer().props.onChangeText(text)});await act(async()=>{composer().props.onSend();await new Promise(resolve=>setTimeout(resolve,0))})}
-beforeEach(()=>{f.storage.clear();f.mode=undefined;f.newChat=undefined;f.dismissTo.mockClear();f.tokenHub=true;f.isAuthenticated=true;f.id=0;f.draft='';f.server='https://work.example';f.language='en';f.credentials={token:'head.eyJzdWIiOiJmaXh0dXJlIiwiaXNzIjoiaGFuZHkifQ.sig',secret:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'};vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);fetcher=vi.fn(async(url:string,init:RequestInit)=>url.endsWith('/models')?catalog():completion(init));vi.stubGlobal('fetch',fetcher)});
+beforeEach(()=>{f.storage.clear();f.mode=undefined;f.newChat=undefined;f.dismissTo.mockClear();f.tokenHub=true;f.isAuthenticated=true;f.id=0;f.draft='';f.server='https://work.example';f.language='en';f.credentials={token:'head.eyJzdWIiOiJmaXh0dXJlIiwiaXNzIjoiaGFuZHkifQ.sig',secret:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'};vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);fetcher=vi.fn(async(url:string,init:RequestInit)=>url.endsWith('/models')?catalog():url.endsWith('/conversations')?new Response(JSON.stringify({conversations:[]}),{headers:{'content-type':'application/json'}}):url.includes('/conversations/')?new Response('',{status:404}):completion(init));vi.stubGlobal('fetch',fetcher)});
 afterEach(async()=>{if(renderer)await act(async()=>renderer.unmount());vi.unstubAllGlobals()});
 it('normal composer offers exactly the real authorized catalog without a synthetic default',async()=>{await render();expect(composer().props.availableModels.map((x:any)=>x.key)).toEqual(['qwen-current','claude-authorized']);expect(composer().props.modelMode.key).toBe('qwen-current')});
 it('normal sends carry the chosen model, exact complete history, unique IDs and only the Work auth token',async()=>{await render();await send('first');await send('follow up');const calls=fetcher.mock.calls.filter(([url])=>url.endsWith('/stream'));expect(calls).toHaveLength(2);const first=JSON.parse(calls[0][1].body as string),second=JSON.parse(calls[1][1].body as string);expect(second.model).toBe('qwen-current');expect(second.messages).toEqual([{role:'user',content:'first'},{role:'assistant',content:'answer'},{role:'user',content:'follow up'}]);expect(second.requestId).not.toBe(first.requestId);expect(JSON.stringify(calls)).not.toContain(f.credentials.secret)});
@@ -133,7 +133,8 @@ it('platform mode still refuses an empty catalog rather than showing a provider 
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify({mode:'real',billable:true,models:[]}),{headers:{'content-type':'application/json'}}));
     await renderPlatform();await send('not allowed');
     expect(composer().props.availableModels).toEqual([]);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls.filter(([url])=>url.endsWith('/models'))).toHaveLength(1);
+    expect(fetcher.mock.calls.some(([url])=>url.endsWith('/stream'))).toBe(false);
 });
 it('unreadable encrypted history is never overwritten on unmount',async()=>{
     const {accountScope}=await import('./TokenHubConversation');

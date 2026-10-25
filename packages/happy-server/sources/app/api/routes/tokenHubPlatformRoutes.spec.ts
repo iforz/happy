@@ -7,6 +7,7 @@ import { defaultPageConfig } from '@slopus/happy-wire';
 import type { Fastify } from '../types';
 import { enableAuthentication } from '../utils/enableAuthentication';
 import type { WorkAuthorization } from '@/app/tokenhub/workAuthorization';
+import type { PlatformConversations } from '@/app/tokenhub/platformConversations';
 import { PlatformSessionStore } from '@/app/tokenhub/platformSession';
 import { tokenHubPlatformRoutes } from './tokenHubPlatformRoutes';
 
@@ -54,6 +55,7 @@ const endpoints = [
 type ResponseLike = { headers: Record<string, unknown>; json(): any; body: string; statusCode: number };
 type Flow = { state: string; nonce: string; challenge: string; cookie: string; code: string; response: ResponseLike };
 type Options = {
+    history?: PlatformConversations;
     env?: NodeJS.ProcessEnv;
     metadata?: Record<string, unknown>;
     claims?: Record<string, unknown>;
@@ -203,7 +205,7 @@ function setup(options: Options = {}) {
     enableAuthentication(app as unknown as Fastify, legacyAuthorization);
     const pageConfig = vi.fn(async () => ({ ...defaultPageConfig, showLogin: true, ssoReady: true, loginUrl: authority + '/happy/authorize', ...options.page }));
     tokenHubPlatformRoutes(app as unknown as Fastify, {
-        env, transport: transport as typeof fetch, pageConfig, now: () => now,
+        env, transport: transport as typeof fetch, pageConfig, now: () => now, history: options.history,
         ...(options.maxSessions !== undefined ? { maxSessions: options.maxSessions } : {}),
         ...(options.maxFlows !== undefined ? { maxFlows: options.maxFlows } : {}),
     });
@@ -814,5 +816,103 @@ describe('platform Core gateway boundary', () => {
         expect(logout.statusCode).toBe(200); const response = await pending;
         expect(response.body).toContain('authorization_revoked'); expect(response.body).not.toContain('"type":"done"'); expect(f.streamCancelled).toHaveBeenCalledOnce();
         expect(f.calls.some(call => call.url.endsWith('/revoke'))).toBe(false);
+    });
+});
+
+
+const historyId = '81b62d84-999a-4cab-8c3a-8beca703ef7a';
+const historyRequestId = 'bd780771-85ee-4b19-a744-9999b73034a9';
+function syntheticHistory() {
+    let conversation: any = null;
+    const history = {
+        list: vi.fn(async (_owner: unknown) => conversation ? [{ id: conversation.id, model: conversation.model, title: 'hello', updatedAt: 1, lastStatus: conversation.turns.at(-1).status }] : []),
+        get: vi.fn(async (_owner: unknown, _id: string) => conversation),
+        remove: vi.fn(async (_owner: unknown, _id: string) => { conversation = null; }),
+        import: vi.fn(async (_owner: unknown, input: any) => { conversation = { ...input, updatedAt: 1 }; return conversation; }),
+        begin: vi.fn(async (_owner: unknown, input: any) => {
+            if (conversation) return { created: false, conversation, turn: conversation.turns[0] };
+            const turn = { id: input.requestId, user: input.messages.at(-1).content, assistant: '', status: 'streaming' };
+            conversation = { id: input.conversationId, model: input.model, turns: [turn], updatedAt: 1 };
+            return { created: true, conversation, turn };
+        }),
+        checkpoint: vi.fn(async (_owner: unknown, _id: string, turn: any) => {
+            conversation = { ...conversation, turns: [{ ...conversation.turns[0], ...turn }], updatedAt: 2 }; return conversation;
+        }),
+    };
+    return history;
+}
+
+describe('account-scoped platform conversation routes', () => {
+    it('requires both cookie authentication and CSRF plus live authority for all history reads and writes', async () => {
+        const history = syntheticHistory(); const f = setup({ history: history as PlatformConversations });
+        const paths = [
+            { method: 'GET' as const, url: prefix + '/conversations' },
+            { method: 'GET' as const, url: prefix + '/conversations/' + historyId },
+            { method: 'DELETE' as const, url: prefix + '/conversations/' + historyId },
+            { method: 'POST' as const, url: prefix + '/conversations/import', payload: { id: historyId, model: 'model-a', turns: [{ id: historyRequestId, user: 'old', assistant: 'reply', status: 'complete' }] } },
+        ];
+        for (const path of paths) {
+            expect((await f.app.inject({ ...path, headers: browserHeaders })).statusCode).toBe(401);
+            expect((await f.app.inject({ ...path, headers: { ...browserHeaders, authorization: 'Bearer signed-legacy-token' } })).statusCode).toBe(401);
+        }
+        const login = await f.login();
+        for (const path of paths) expect((await f.app.inject({ ...path, headers: { ...browserHeaders, cookie: login.cookie } })).statusCode).toBe(403);
+        f.state.coreUnavailable = true;
+        for (const path of paths) expect((await f.app.inject({ ...path, headers: { ...browserHeaders, cookie: login.cookie, 'x-tokenhub-csrf': login.session.csrf } })).statusCode).toBe(503);
+        for (const method of Object.values(history)) expect(method).not.toHaveBeenCalled();
+        expect(f.legacyVerify).not.toHaveBeenCalled();
+    });
+
+    it('derives every history owner from the verified server principal and rejects client identity fields', async () => {
+        const history = syntheticHistory(); const f = setup({ history: history as PlatformConversations }); const login = await f.login();
+        const headers = { ...browserHeaders, cookie: login.cookie, 'x-tokenhub-csrf': login.session.csrf };
+        const response = await f.app.inject({ method: 'GET', url: prefix + '/conversations', headers });
+        expect(response.statusCode).toBe(200); expect(response.json()).toEqual({ conversations: [] });
+        expect(response.headers['cache-control']).toBe('no-store');
+        expect(history.list).toHaveBeenCalledWith(expect.objectContaining({ authority, issuer: 'tokenapi', subject: '42' }));
+        expect((await f.app.inject({ method: 'GET', url: prefix + '/conversations?subject=43', headers })).statusCode).toBe(400);
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/conversations/import', headers, payload: { id: historyId, model: 'model-a', subject: '43', turns: [{ id: historyRequestId, user: 'old', assistant: 'reply', status: 'complete' }] } })).statusCode).toBe(400);
+        const imported = await f.app.inject({ method: 'POST', url: prefix + '/conversations/import', headers, payload: { id: historyId, model: 'model-a', turns: [{ id: historyRequestId, user: 'old', assistant: 'reply', status: 'complete' }] } });
+        expect(imported.statusCode, imported.body).toBe(200);
+        expect(history.import.mock.calls[0][0]).toMatchObject({ authority, subject: '42' });
+        expect((await f.app.inject({ method: 'GET', url: prefix + '/conversations/' + historyId, headers })).json().turns[0].user).toBe('old');
+        expect((await f.app.inject({ method: 'DELETE', url: prefix + '/conversations/' + historyId, headers })).json()).toEqual({ deleted: true });
+        expect(history.remove.mock.calls[0][0]).toMatchObject({ authority, subject: '42' });
+    });
+
+    it('saves user turn before inference, saves partial/final output, and never repeats a recorded request', async () => {
+        const history = syntheticHistory(); const f = setup({ history: history as PlatformConversations }); const login = await f.login();
+        const headers = { ...browserHeaders, cookie: login.cookie, 'x-tokenhub-csrf': login.session.csrf };
+        const payload = { model: 'model-a', conversationId: historyId, requestId: historyRequestId, messages: [{ role: 'user', content: 'hello' }] };
+        const response = await f.app.inject({ method: 'POST', url: prefix + '/stream', headers, payload });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(history.begin).toHaveBeenCalledTimes(1);
+        const calls = history.checkpoint.mock.calls.map(call => call[2]);
+        expect(calls.some(turn => turn.assistant === 'hello')).toBe(true);
+        const saved = await history.get({}, historyId);
+        expect(saved.turns[0]).toMatchObject({ id: historyRequestId, user: 'hello', assistant: 'hello', status: 'complete', usage: { requestId: historyRequestId, accounting: 'core' } });
+        expect(response.body).toContain('"type":"done"');
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/stream', headers, payload })).statusCode).toBe(409);
+        expect(f.calls.filter(call => call.url.endsWith('/chat/completions'))).toHaveLength(1);
+        expect(JSON.parse(String(f.calls.find(call => call.url.endsWith('/chat/completions'))!.init!.body))).not.toHaveProperty('conversationId');
+    });
+
+    it('fails closed before inference if durable initial persistence fails', async () => {
+        const history = syntheticHistory(); history.begin.mockRejectedValueOnce(new Error('synthetic DB failure'));
+        const f = setup({ history: history as PlatformConversations }); const login = await f.login();
+        const response = await f.app.inject({ method: 'POST', url: prefix + '/stream', headers: { ...browserHeaders, cookie: login.cookie, 'x-tokenhub-csrf': login.session.csrf }, payload: { model: 'model-a', prompt: 'hello', conversationId: historyId, requestId: historyRequestId } });
+        expect(response.statusCode).toBe(503); expect(response.body).not.toContain('synthetic');
+        expect(f.calls.filter(call => call.url.endsWith('/chat/completions'))).toHaveLength(0);
+    });
+
+    it('does not deliver a late history read after sign-out', async () => {
+        const history = syntheticHistory(); let release!: () => void;
+        history.list.mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return []; });
+        const f = setup({ history: history as PlatformConversations }); const login = await f.login();
+        const headers = { ...browserHeaders, cookie: login.cookie, 'x-tokenhub-csrf': login.session.csrf };
+        const read = f.app.inject({ method: 'GET', url: prefix + '/conversations', headers });
+        await vi.waitFor(() => expect(history.list).toHaveBeenCalled());
+        expect((await f.app.inject({ method: 'POST', url: prefix + '/logout', headers, payload: {} })).statusCode).toBe(200);
+        release(); expect((await read).statusCode).toBe(401);
     });
 });

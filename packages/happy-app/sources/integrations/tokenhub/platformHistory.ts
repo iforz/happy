@@ -14,3 +14,11 @@ export function platformHistoryKey(scope: string, storage?: Pick<Storage, 'getIt
         return storage.getItem(key) === fresh ? fresh : null;
     } catch { return null; }
 }
+
+/** Legacy ciphertext is read-only; missing keys must never be silently replaced. */
+export function readPlatformHistoryKey(scope: string, storage?: Pick<Storage, 'getItem'>): string | null {
+    try {
+        const saved = (storage ?? localStorage).getItem('tokenhub-platform-history-key:v1:' + scope);
+        return saved && decodeBase64(saved, 'base64url').length === 32 ? saved : null;
+    } catch { return null; }
+}

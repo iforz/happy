@@ -32,3 +32,20 @@ Tests cover the client parser and screen interactions using local synthetic
 fixtures. They do not call paid models, validate production billing, or approve
 a deployment. Signing in to a live service and native-device acceptance remain
 separate checks.
+
+## Ordinary Work account history
+
+`PlatformAccountConversation.tsx` uses cookie/CSRF-authenticated account history
+from `platformConversationClient.ts`. The server is authoritative: every new
+platform stream carries a conversation UUID and a stable request/turn UUID, and
+its result is read back after success, failure, or cancellation. Read-only
+reconciliation waits for saved terminal status, including streams on other
+devices. Model inference is never retried automatically. Focus, reload, and
+account/session boundaries invalidate stale requests.
+
+The old browser-encrypted records and their data keys remain unchanged. They are
+shown separately as browser-only records; continuing one requires an explicit
+per-conversation import confirmation naming the Work server and TokenHub account.
+Imports are idempotent and retain the browser copy. Confirmed deletion affects
+only server account history. Device/native history and gateway request shapes
+remain separate and unchanged.

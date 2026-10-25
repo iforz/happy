@@ -11,7 +11,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const MODEL_IDS = ['mock-echo', 'mock-slow', 'mock-error'] as const;
 export type WorkMockModelId = typeof MODEL_IDS[number];
 export interface WorkMessage { role: 'user' | 'assistant'; content: string }
-export interface WorkChatInput { model: string; prompt?: string; messages?: WorkMessage[]; requestId?: string }
+export interface WorkChatInput { model: string; prompt?: string; messages?: WorkMessage[]; requestId?: string; conversationId?: string }
 export interface WorkMockModel { id: string; name: string }
 export interface WorkModelCatalog { mode: 'mock' | 'real'; billable: boolean; models: WorkMockModel[] }
 export interface WorkMockUsage {
@@ -143,7 +143,7 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
                 },
                 credentials: options.platformSession ? 'include' : 'omit', redirect: 'error', cache: 'no-store',
                 // The request shape is constructed here, never spread from caller-owned input.
-                ...(body ? { body: JSON.stringify({ model: body.model, ...(body.messages ? { messages: body.messages.map(({role, content}) => ({role, content})) } : { prompt: body.prompt }), ...(body.requestId ? { requestId: body.requestId } : {}) }) } : {}),
+                ...(body ? { body: JSON.stringify({ model: body.model, ...(body.messages ? { messages: body.messages.map(({role, content}) => ({role, content})) } : { prompt: body.prompt }), ...(body.requestId ? { requestId: body.requestId } : {}), ...(options.platformSession && body.conversationId ? { conversationId: body.conversationId } : {}) }) } : {}),
                 signal: controller.signal,
             });
             // A nonconforming transport might resolve after abort. Do not leave its body open.
@@ -210,8 +210,9 @@ export function createWorkMockClient(options: WorkMockClientOptions) {
             const validPrompt = typeof input.prompt === 'string' && !!input.prompt.trim() && input.prompt.length <= WORK_MOCK_MAX_PROMPT_LENGTH
             if (!(catalog ? catalog.models.some(model => model.id === input.model) : validModel(input.model))
                 || (real && (typeof input.requestId !== 'string' || !UUID.test(input.requestId)))
+                || (options.platformSession && input.conversationId !== undefined && (typeof input.conversationId !== 'string' || !UUID.test(input.conversationId)))
                 || (input.messages !== undefined ? !validHistory || input.prompt !== undefined : !validPrompt)) throw new WorkMockError('invalid_request');
-            return request('stream', { model: input.model, ...(input.messages ? { messages: input.messages } : { prompt: input.prompt }), ...(real ? { requestId: input.requestId } : {}) }, signal, async (response, requestSignal) => {
+            return request('stream', { model: input.model, ...(input.messages ? { messages: input.messages } : { prompt: input.prompt }), ...(real ? { requestId: input.requestId } : {}), ...(options.platformSession && input.conversationId ? { conversationId: input.conversationId } : {}) }, signal, async (response, requestSignal) => {
                 let buffer = '';
                 let usage: WorkMockUsage | undefined;
                 let done = false;

@@ -42,6 +42,9 @@ export function enableAuthentication(app: Fastify, authorization: WorkAuthorizat
             'POST /v1/tokenhub/platform/logout',
             'GET /v1/tokenhub/platform/models', 'HEAD /v1/tokenhub/platform/models',
             'POST /v1/tokenhub/platform/stream',
+            'GET /v1/tokenhub/platform/conversations', 'HEAD /v1/tokenhub/platform/conversations',
+            'GET /v1/tokenhub/platform/conversations/:id', 'HEAD /v1/tokenhub/platform/conversations/:id',
+            'DELETE /v1/tokenhub/platform/conversations/:id', 'POST /v1/tokenhub/platform/conversations/import',
         ]);
         const unsupported = new Set([
             '/v1/connect/github/params', '/v1/connect/github/callback', '/v1/connect/github/webhook',

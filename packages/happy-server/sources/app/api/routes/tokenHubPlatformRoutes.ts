@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Fastify } from '../types';
 import { coreInput, CoreGatewayError, createCoreGateway, type CoreGateway } from '@/app/tokenhub/coreGateway';
+import { getPlatformConversations, PlatformConversationError, MAX_PLATFORM_ASSISTANT_CHARS, type PlatformConversations, type PlatformConversationTurn } from '@/app/tokenhub/platformConversations';
 import { workClientContext } from '@/app/tokenhub/clientContext';
 import { verifyIdentity } from '@/app/tokenhub/flow';
 import { loadPageConfig } from '@/app/tokenhub/pageConfig';
@@ -23,12 +24,29 @@ export const PLATFORM_ROUTE_METHODS = new Set([
     'POST /v1/tokenhub/platform/logout',
     'GET /v1/tokenhub/platform/models', 'HEAD /v1/tokenhub/platform/models',
     'POST /v1/tokenhub/platform/stream',
+    'GET /v1/tokenhub/platform/conversations', 'HEAD /v1/tokenhub/platform/conversations',
+    'GET /v1/tokenhub/platform/conversations/:id', 'HEAD /v1/tokenhub/platform/conversations/:id',
+    'DELETE /v1/tokenhub/platform/conversations/:id', 'POST /v1/tokenhub/platform/conversations/import',
 ]);
 interface Dependencies {
     env?: NodeJS.ProcessEnv; transport?: typeof fetch; pageConfig?: typeof loadPageConfig;
-    gateway?: CoreGateway; now?: () => number; maxSessions?: number; maxFlows?: number; revalidateMs?: number;
+    history?: PlatformConversations; gateway?: CoreGateway; now?: () => number; maxSessions?: number; maxFlows?: number; revalidateMs?: number;
 }
 const empty = z.object({}).strict();
+const conversationId = z.string().uuid();
+const conversationParams = z.object({ id: conversationId }).strict();
+// Only the platform route accepts history identifiers. Device and Core inputs stay unchanged.
+const platformInput = coreInput.safeExtend({ conversationId: conversationId.optional() })
+    .refine(value => !value.conversationId || !!value.requestId);
+const historyUsage = z.object({
+    requestId: z.string().min(1).max(128), coreRequestId: z.string().max(128).optional(), model: z.string().min(1).max(200),
+    inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(),
+    mock: z.literal(false), billable: z.literal(true), accounting: z.literal('core'),
+}).strict();
+const importConversation = z.object({ id: conversationId, model: z.string().min(1).max(200), turns: z.array(z.object({
+    id: conversationId, user: z.string().min(1).max(16000), assistant: z.string().max(262144),
+    status: z.enum(['complete', 'cancelled', 'failed']), usage: historyUsage.optional(),
+}).strict()).min(1).max(100) }).strict();
 const callback = z.object({ state: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code: z.string().min(1).max(128).optional(), error: z.literal('access_denied').optional() }).strict()
     .refine(value => (value.code !== undefined) !== (value.error !== undefined));
 function samePrincipal(left: PlatformPrincipal, right: PlatformPrincipal) {
@@ -55,6 +73,9 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         }
     } catch { /* Explicitly unavailable, never fall back to Happy identity creation. */ }
     const config = dependencies.pageConfig ?? loadPageConfig;
+    const history = () => dependencies.history ? Promise.resolve(dependencies.history) : getPlatformConversations();
+    const historyFailure = (reply: FastifyReply, error: unknown) => reply.code(error instanceof PlatformConversationError ? error.status : 503)
+        .send({ error: 'Conversation history is unavailable', code: error instanceof PlatformConversationError ? error.code : 'history_unavailable' });
     const context = (request: FastifyRequest) => workClientContext(request.raw, env.TOKENHUB_TRUST_LOOPBACK_PROXY);
     const fail = (reply: FastifyReply, status: number, message = 'Platform session unavailable') => reply.code(status).send({ error: message, platform: true, enabled });
     const metadata = (reply: FastifyReply) => reply.header('Cache-Control', 'no-store').header('Vary', 'Cookie, Origin').header('X-Content-Type-Options', 'nosniff');
@@ -181,7 +202,49 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         catch (error) { return fail(reply, error instanceof CoreGatewayError ? error.status : 502, 'Platform model catalog unavailable'); }
         finally { controller.abort(); session.record.streams.delete(controller); request.raw.removeListener('aborted', abort); reply.raw.removeListener('close', abort); }
     });
-    app.post('/v1/tokenhub/platform/stream', { bodyLimit: 32768, schema: { body: coreInput } }, async (request, reply) => {
+    // No Happy/device account lookup. Every operation is scoped exclusively to a live
+    // TokenHub principal and the current cookie generation, including reads and HEAD.
+    app.get('/v1/tokenhub/platform/conversations', { schema: { querystring: empty } }, async (request, reply) => {
+        if (!available(reply) || !sameOrigin(request, reply, false)) return;
+        const session = await authenticate(request, reply, true);
+        if (!session) return;
+        try {
+            const conversations = await (await history()).list(session.record.principal);
+            if (store.get(session.id) !== session.record) return fail(reply, 401, 'Platform session ended');
+            return { conversations };
+        } catch (error) { return historyFailure(reply, error); }
+    });
+    app.get('/v1/tokenhub/platform/conversations/:id', { schema: { params: conversationParams, querystring: empty } }, async (request, reply) => {
+        if (!available(reply) || !sameOrigin(request, reply, false)) return;
+        const session = await authenticate(request, reply, true);
+        if (!session) return;
+        try {
+            const conversation = await (await history()).get(session.record.principal, request.params.id);
+            if (store.get(session.id) !== session.record) return fail(reply, 401, 'Platform session ended');
+            return conversation ?? reply.code(404).send({ error: 'Conversation not found' });
+        } catch (error) { return historyFailure(reply, error); }
+    });
+    app.delete('/v1/tokenhub/platform/conversations/:id', { schema: { params: conversationParams, querystring: empty } }, async (request, reply) => {
+        if (!available(reply) || !sameOrigin(request, reply, true)) return;
+        const session = await authenticate(request, reply, true);
+        if (!session) return;
+        try {
+            await (await history()).remove(session.record.principal, request.params.id);
+            if (store.get(session.id) !== session.record) return fail(reply, 401, 'Platform session ended');
+            return { deleted: true };
+        } catch (error) { return historyFailure(reply, error); }
+    });
+    app.post('/v1/tokenhub/platform/conversations/import', { bodyLimit: 2 * 1024 * 1024, schema: { body: importConversation, querystring: empty } }, async (request, reply) => {
+        if (!available(reply) || !sameOrigin(request, reply, true)) return;
+        const session = await authenticate(request, reply, true);
+        if (!session) return;
+        try {
+            const conversation = await (await history()).import(session.record.principal, request.body);
+            if (store.get(session.id) !== session.record) return fail(reply, 401, 'Platform session ended');
+            return conversation;
+        } catch (error) { return historyFailure(reply, error); }
+    });
+    app.post('/v1/tokenhub/platform/stream', { bodyLimit: 32768, schema: { body: platformInput } }, async (request, reply) => {
         if (!available(reply) || !sameOrigin(request, reply, true)) return;
         const session = await authenticate(request, reply, true);
         if (!session) return;
@@ -190,6 +253,39 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         session.record.streams.add(controller);
         request.raw.once('aborted', abort); reply.raw.once('close', abort);
         if (request.raw.aborted || reply.raw.destroyed) abort();
+        const { conversationId: savedId, ...input } = request.body;
+        let repository: PlatformConversations | undefined, savedTurn: PlatformConversationTurn | undefined;
+        const saveTurn = async (status = savedTurn!.status) => {
+            const { id, assistant, usage } = savedTurn!;
+            const saved = await repository!.checkpoint(session.record.principal, savedId!, { id, assistant, status, ...(usage ? { usage } : {}) });
+            if (!saved || saved.turns.at(-1)?.id !== id || saved.turns.at(-1)?.status !== status) throw new Error('History write was superseded');
+        };
+        if (savedId) {
+            try {
+                repository = await history();
+                const started = await repository.begin(session.record.principal, {
+                    conversationId: savedId, requestId: input.requestId!, model: input.model,
+                    messages: input.messages ?? [{ role: 'user', content: input.prompt! }],
+                });
+                // Repeating an accepted request never invokes inference twice, even
+                // when the first response was lost. The client reloads saved history.
+                if (!started.created) {
+                    controller.abort(); session.record.streams.delete(controller);
+                    request.raw.removeListener('aborted', abort); reply.raw.removeListener('close', abort);
+                    return reply.code(409).send({ error: 'Request already recorded; reload conversation', code: 'request_conflict' });
+                }
+                savedTurn = { ...started.turn };
+                if (controller.signal.aborted || store.get(session.id) !== session.record) {
+                    await saveTurn('cancelled');
+                    throw new PlatformAuthorityError(401);
+                }
+            } catch (error) {
+                controller.abort(); session.record.streams.delete(controller);
+                request.raw.removeListener('aborted', abort); reply.raw.removeListener('close', abort);
+                if (error instanceof PlatformAuthorityError) return fail(reply, error.status);
+                return historyFailure(reply, error);
+            }
+        }
         let checking = false, expiry: ReturnType<typeof setTimeout>;
         const resetExpiry = () => { if (expiry) clearTimeout(expiry); expiry = setTimeout(() => controller.abort('authorization_revoked'), Math.max(0, Math.min(session.record.principal.expiresAt - now(), 2147483647))); };
         resetExpiry();
@@ -207,8 +303,43 @@ export function tokenHubPlatformRoutes(app: Fastify, dependencies: Dependencies 
         }, dependencies.revalidateMs ?? WORK_REVALIDATE_MS);
         const cleanup = () => { clearInterval(timer); clearTimeout(expiry); controller.abort(); session.record.streams.delete(controller); request.raw.removeListener('aborted', abort); reply.raw.removeListener('close', abort); };
         const stream = Readable.from((async function* () {
-            try { for await (const event of gateway!.stream(request.body, session.record.grant, client, controller.signal)) { if (reply.raw.destroyed) break; yield JSON.stringify(event) + '\n'; } }
-            finally { cleanup(); }
+            let complete = false, lastSaved = 0;
+            try {
+                for await (const event of gateway!.stream(input, session.record.grant, client, controller.signal)) {
+                    if (savedTurn && repository && savedId) {
+                        if (event.type === 'delta') {
+                            if (savedTurn.assistant.length + event.text.length > MAX_PLATFORM_ASSISTANT_CHARS) throw new Error('History response limit');
+                            savedTurn.assistant += event.text;
+                            // Persist bounded checkpoints before exposing those chunks.
+                            if (now() - lastSaved >= 500 || lastSaved === 0) {
+                                await saveTurn();
+                                lastSaved = now();
+                            }
+                        } else if (event.type === 'usage') {
+                            const { type: _type, ...usage } = event;
+                            savedTurn.usage = usage;
+                        } else if (event.type === 'done') {
+                            savedTurn.status = 'complete';
+                            await saveTurn();
+                            complete = true;
+                        } else if (event.type === 'error') {
+                            savedTurn.status = event.code === 'cancelled' ? 'cancelled' : 'failed';
+                            await saveTurn();
+                        }
+                    }
+                    if (reply.raw.destroyed || (controller.signal.aborted && event.type !== 'error')) break;
+                    yield JSON.stringify(event) + '\n';
+                }
+            } catch {
+                // Storage failure is not a reason to retry a potentially billed call.
+                if (!reply.raw.destroyed && !controller.signal.aborted) yield JSON.stringify({ type: 'error', code: 'work_reconciliation_required', message: 'History or usage reconciliation is pending; reload before continuing.' }) + '\n';
+            } finally {
+                if (savedTurn && repository && savedId && !complete) {
+                    try { await saveTurn(controller.signal.aborted ? 'cancelled' : 'failed'); }
+                    catch { /* Persisted streaming lease expires to failed; never repeat inference. */ }
+                }
+                cleanup();
+            }
         })());
         stream.once('close', cleanup);
         return reply.type('application/x-ndjson').header('X-TokenHub-Gateway', 'core').header('X-Accel-Buffering', 'no').send(stream);

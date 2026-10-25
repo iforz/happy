@@ -421,3 +421,32 @@ model TokenHubIdentity {
     @@id([authority, subject])
     @@unique([authority, accountId])
 }
+
+// Ordinary Work history is owned by the live platform principal, never a device
+// encryption Account, Session, grant, bearer token, or provider credential.
+model PlatformConversationOwner {
+    authority String
+    issuer String
+    subject String
+    conversations PlatformConversation[]
+    @@id([authority, issuer, subject])
+}
+
+model PlatformConversation {
+    authority String
+    issuer String
+    subject String
+    id String @db.Uuid
+    owner PlatformConversationOwner @relation(fields: [authority, issuer, subject], references: [authority, issuer, subject], onDelete: Cascade, map: "PlatformConversation_owner_fkey")
+    model String
+    title String
+    turns Json @default("[]")
+    requestIds String[] @default([]) @db.Uuid
+    importDigest String?
+    lastStatus String @default("failed")
+    activeUntil DateTime?
+    deletedAt DateTime?
+    updatedAt DateTime @default(now())
+    @@id([authority, issuer, subject, id])
+    @@index([authority, issuer, subject, updatedAt(sort: Desc)])
+}

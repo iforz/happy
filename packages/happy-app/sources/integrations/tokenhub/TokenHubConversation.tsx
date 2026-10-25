@@ -15,8 +15,7 @@ import { createWorkMockClient, WorkMockError, type WorkModelCatalog } from './wo
 import { conversationInput, requireRealCatalog, selectedModelAllowed, type Conversation, type Turn } from './conversation';
 import { workText as t } from './workText';
 import { platformAccountScope, type PlatformSession } from './platformSession';
-import { platformHistoryKey } from './platformHistory';
-import { usePlatformSession } from './PlatformSessionProvider';
+import { PlatformAccountConversation } from './PlatformAccountConversation';
 
 const storage = new MMKV({id:'tokenhub-conversations-v1'});
 export function accountScope(server: string, token: string): string {
@@ -49,17 +48,19 @@ export function TokenHubHomeConversation() {
 export function PlatformHomeConversation({ session }: { session: PlatformSession }) {
     const { newChat } = useLocalSearchParams<{ newChat?: string }>();
     const intent = typeof newChat === 'string' ? newChat : '';
-    return <TokenHubConversation key={JSON.stringify([platformAccountScope(session), session.csrf, intent])} startNew={!!intent} platformSession={session} />;
+    return <TokenHubConversation key={JSON.stringify([platformAccountScope(session), session.sessionId, session.csrf, intent])} startNew={!!intent} platformSession={session} />;
 }
 
 /** The normal TokenHub conversation surface. Machine RPC is deliberately not used. */
 export function TokenHubConversation({ startNew = false, platformSession }: { startNew?: boolean; platformSession?: PlatformSession } = {}) {
+    if (platformSession) return <PlatformAccountConversation key={JSON.stringify([platformAccountScope(platformSession), platformSession.sessionId, platformSession.csrf])} session={platformSession} startNew={startNew} />;
+    return <LocalTokenHubConversation startNew={startNew} />;
+}
+
+function LocalTokenHubConversation({ startNew = false }: { startNew?: boolean } = {}) {
     const auth = useAuth(), router = useRouter(), {theme} = useUnistyles();
-    const platform = usePlatformSession();
-    const server = getServerUrl(), token = platformSession ? '' : auth.credentials?.token || '';
-    const scope = platformSession ? platformAccountScope(platformSession, server) : accountScope(server, token);
-    const localKey = React.useMemo(() => platformSession ? platformHistoryKey(scope) : null, [scope, !!platformSession]);
-    const secret = platformSession ? localKey || '' : auth.credentials?.secret || '';
+    const server = getServerUrl(), token = auth.credentials?.token || '';
+    const scope = accountScope(server, token), secret = auth.credentials?.secret || '';
     const composer = React.useRef<MultiTextInputHandle>(null);
     const active = React.useRef<AbortController | null>(null), generation = React.useRef(0);
     const visibleHistory = React.useRef<Conversation[]>([]);
@@ -67,14 +68,13 @@ export function TokenHubConversation({ startNew = false, platformSession }: { st
     const [conversations, setConversations] = React.useState<Conversation[]>([]);
     const [selected, setSelected] = React.useState(''), [model, setModel] = React.useState('');
     const [loading, setLoading] = React.useState(true), [busy, setBusy] = React.useState(false), [draft, setDraft] = React.useState('');
-    const [error, setError] = React.useState(''), [storageError, setStorageError] = React.useState(platformSession && !localKey ? t('savedError') : '');
+    const [error, setError] = React.useState(''), [storageError, setStorageError] = React.useState('');
     const [reload, setReload] = React.useState(0), [blocked, setBlocked] = React.useState(false);
     const focused = React.useRef(false);
     const historyWritable = React.useRef(true);
     const activation = React.useRef({ initialized: false, scope: '', selected: '', model: '', blocked: false, error: '' });
     Object.assign(activation.current, { selected, model, blocked, error });
-    const client = React.useMemo(() => createWorkMockClient({baseUrl:server, requireRealCatalog:true, tokenProvider:async()=>token || null, fetch:tokenHubFetch,
-        ...(platformSession ? { platformSession: { csrf: platformSession.csrf, origin: window.location.origin } } : {})}), [server,token,platformSession?.csrf,reload]);
+    const client = React.useMemo(() => createWorkMockClient({baseUrl:server, requireRealCatalog:true, tokenProvider:async()=>token || null, fetch:tokenHubFetch}), [server,token,reload]);
     const current = conversations.find(item=>item.id===selected);
     const validModel = selectedModelAllowed(catalog, model);
     function persist(value: Conversation[]) {
@@ -161,10 +161,9 @@ export function TokenHubConversation({ startNew = false, platformSession }: { st
         <View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8}}>
             <Text accessibilityRole="header" style={{fontSize:24,fontWeight:'600',color:theme.colors.text,flex:1}}>{t('title')}</Text>
             {link(t('agents'),()=>router.push('/device-agents' as any))}
-            {platformSession ? link(t('signOutWork'),()=>{void platform.logout().catch(()=>{});}) : link(t('settings'),()=>router.push('/settings'))}
+            {link(t('settings'),()=>router.push('/settings'))}
         </View>
         <Text style={{color:theme.colors.textSecondary}}>{t('cloudDescription')}</Text>
-        {platformSession ? <Text style={{color:theme.colors.textSecondary}}>{t('platformHistory')}</Text> : null}
         <ScrollView horizontal style={{maxHeight:45}}>
             {link(t('newChat'),()=>{if(!busy){setSelected('');setDraft('');setError('');composer.current?.setTextAndSelection('',{start:0,end:0});}})}
             {conversations.map(item=><Pressable key={item.id} disabled={busy} onPress={()=>{setSelected(item.id);setModel(item.model);setError('');}} style={{padding:10}}><Text numberOfLines={1} style={{maxWidth:180,color:theme.colors.text}}>{item.turns[0]?.user || t('newChat')}</Text></Pressable>)}
