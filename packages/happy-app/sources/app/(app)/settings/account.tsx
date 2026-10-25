@@ -1,3 +1,5 @@
+import { usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { PlatformSettingsView } from '@/integrations/tokenhub/PlatformSettingsView';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, Platform } from 'react-native';
 import { useAuth } from '@/auth/AuthContext';
@@ -100,7 +102,7 @@ function buildPushTokenSubtitle(pushToken: PushToken, options: {
     return lines.join('\n');
 }
 
-export default React.memo(() => {
+const DeviceAccountSettingsScreen = React.memo(() => {
     const { theme } = useUnistyles();
     const auth = useAuth();
     const [showSecret, setShowSecret] = useState(false);
@@ -598,3 +600,8 @@ export default React.memo(() => {
         </>
     );
 });
+
+export default function AccountSettingsScreen() {
+    const platform = usePlatformSession();
+    return platform.status !== 'disabled' ? <PlatformSettingsView accountOnly /> : <DeviceAccountSettingsScreen />;
+}

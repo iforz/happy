@@ -1,3 +1,5 @@
+import { usePlatformSession } from '@/integrations/tokenhub/PlatformSessionProvider';
+import { PlatformSettingsView, type PlatformSettingsProps } from '@/integrations/tokenhub/PlatformSettingsView';
 import { workText } from '@/integrations/tokenhub/workText';
 import { HappyEngineeringWordmark } from './onboarding/HappyEngineeringWordmark';
 import { usePageConfig } from '@/integrations/tokenhub/usePageConfig';
@@ -72,7 +74,7 @@ function formatBuildSubtitle(buildConfig: BuildConfig): string | undefined {
     ].filter(Boolean).join(' / ');
 }
 
-export const SettingsView = React.memo(function SettingsView({
+const DeviceSettingsView = React.memo(function SettingsView({
     topContentInset = 0,
     bottomContentInset = 0,
     onScroll,
@@ -424,4 +426,9 @@ export const SettingsView = React.memo(function SettingsView({
 
         </ItemList>
     );
+});
+
+export const SettingsView = React.memo(function SettingsView(props: PlatformSettingsProps) {
+    const platform = usePlatformSession();
+    return platform.status !== 'disabled' ? <PlatformSettingsView {...props} /> : <DeviceSettingsView {...props} />;
 });

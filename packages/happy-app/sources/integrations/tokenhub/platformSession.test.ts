@@ -69,6 +69,10 @@ describe('seedless Work platform authentication', () => {
         expect(isPlatformRoute('/new', 'device', { platform: true })).toBe(false);
         expect(isPlatformRoute('/', undefined, { legacy: true })).toBe(true);
     });
+    it('keeps safe native settings in the cookie runtime and excludes device routes', () => {
+        for (const path of ['/settings', '/settings/', '/settings/appearance', '/settings/language', '/settings/account']) expect(isPlatformRoute(path)).toBe(true);
+        for (const path of ['/settings/agents', '/settings/connect/claude', '/settings/voice', '/settings/usage']) expect(isPlatformRoute(path)).toBe(false);
+    });
     it('starts with no Happy identity and stores only one-time navigation state', async () => {
         await begin();
         expect(f.fetch).toHaveBeenCalledOnce();

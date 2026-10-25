@@ -75,6 +75,14 @@ describe('actual root runtime ownership', () => {
         await renderRoot(); expect(renderer!.root.findAllByType('PlatformSlot')).toHaveLength(1); expect(renderer!.root.findAllByType('DeviceSidebar')).toHaveLength(0);
         expect(f.getCredentials).not.toHaveBeenCalled(); expect(f.syncRestore).not.toHaveBeenCalled(); expect(f.authProps).toHaveBeenCalledWith(null);
     });
+    it('keeps settings navigation in the platform runtime without loading a device identity', async () => {
+        await renderRoot();
+        for (const path of ['/settings', '/settings/appearance', '/settings/language', '/settings/account', '/']) {
+            navigate(path); await rerenderRoot();
+            expect(f.reload).not.toHaveBeenCalled(); expect(f.getCredentials).not.toHaveBeenCalled(); expect(f.syncRestore).not.toHaveBeenCalled();
+            expect(renderer!.root.findAllByType('DeviceSidebar')).toHaveLength(0);
+        }
+    });
     it('boots an explicit device route with the preserved legacy identity', async () => {
         navigate('/device-agents'); await renderRoot(); expect(renderer!.root.findAllByType('DeviceSidebar')).toHaveLength(1);
         expect(f.getCredentials).toHaveBeenCalledOnce(); expect(f.syncRestore).toHaveBeenCalledWith(f.credentials);
