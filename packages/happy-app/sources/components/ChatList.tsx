@@ -181,8 +181,10 @@ export const ChatList = React.memo((props: {
     onBottomDockVisibilityChange?: (visible: boolean) => void;
 }) => {
     const { messages, hasMoreOlder, isLoadingOlder } = useSessionMessages(props.session.id);
+    const sessionState = useSession(props.session.id) ?? props.session;
     return (
         <ChatListInternal
+            sessionState={sessionState}
             metadata={props.session.metadata}
             sessionId={props.session.id}
             active={props.active ?? true}
@@ -198,6 +200,31 @@ export const ChatList = React.memo((props: {
         />
     )
 });
+
+/** Account-backed text uses the same native list, without device storage or history RPC. */
+export const AccountChatList = React.memo((props: {
+    conversationId: string;
+    messages: Message[];
+    onSendMessage: (text: string) => void | Promise<void>;
+    streaming?: boolean;
+    topContentInset?: number;
+    bottomContentInset?: number;
+    scrollButtonInset?: number;
+}) => <ChatListInternal
+    metadata={null}
+    sessionState={null}
+    sessionId={props.conversationId}
+    active={true}
+    messages={props.messages}
+    hasMoreOlder={false}
+    isLoadingOlder={false}
+    accountBacked={true}
+    streaming={props.streaming}
+    onSendMessage={props.onSendMessage}
+    topContentInset={props.topContentInset}
+    bottomContentInset={props.bottomContentInset}
+    scrollButtonInset={props.scrollButtonInset}
+/>);
 
 /**
  * Renders past the oldest message: the older-history spinner, Retry after a
@@ -240,6 +267,10 @@ const NewerEnd = React.memo((props: { sessionId: string }) => {
 });
 
 const ChatListInternal = React.memo((props: {
+    sessionState: Session | null,
+    accountBacked?: boolean,
+    streaming?: boolean,
+    onSendMessage?: (text: string) => void | Promise<void>,
     metadata: Metadata | null,
     sessionId: string,
     active: boolean,
@@ -278,7 +309,7 @@ const ChatListInternal = React.memo((props: {
     const [olderBlocked, setOlderBlocked] = React.useState<'error' | 'limit' | null>(null);
     // Perf reporting only; history paging keys off measured layout instead.
     const listReadyRef = React.useRef(false);
-    const session = useSession(props.sessionId);
+    const session = props.sessionState;
     const controlMode = resolveControlMode(usesControlledSessionUi(session?.metadata) ? session?.agentState?.controlledByUser : false);
     const previousControlModeRef = React.useRef(controlMode);
 
@@ -308,7 +339,7 @@ const ChatListInternal = React.memo((props: {
     );
     const [appState, setAppState] = React.useState(AppState.currentState);
     const sessionInForeground = props.active && appState !== 'background';
-    const currentTurnComplete = session?.thinking !== true
+    const currentTurnComplete = !props.streaming && session?.thinking !== true
         && !hasPendingPermission;
     const groupingOptions = React.useMemo(
         () => ({ collapseCurrentTurn: currentTurnComplete }),
@@ -603,10 +634,12 @@ const ChatListInternal = React.memo((props: {
                     message={item.message}
                     metadata={props.metadata}
                     sessionId={props.sessionId}
+                    parseDeviceCommands={!props.accountBacked}
+                    onSendMessage={props.onSendMessage}
                 />
             </DiffSyntaxCell>
         );
-    }, [props.metadata, props.sessionId, syntaxViewport, isGroupExpanded, handleToggleGroup]);
+    }, [props.metadata, props.sessionId, props.onSendMessage, props.accountBacked, syntaxViewport, isGroupExpanded, handleToggleGroup]);
 
     // The list is inverted, so offset 0 is the newest message and growing
     // offsets walk back through history.
@@ -823,7 +856,7 @@ const ChatListInternal = React.memo((props: {
                 onContentSizeChange={handleContentSizeChange}
                 // Swapped: the list's header sits at item 0, which an inverted
                 // list draws at the bottom of the screen.
-                ListHeaderComponent={<NewerEnd sessionId={props.sessionId} />}
+                ListHeaderComponent={props.accountBacked ? null : <NewerEnd sessionId={props.sessionId} />}
                 ListFooterComponent={(
                     <OlderEnd
                         // The store's flag also pulses on background pages the

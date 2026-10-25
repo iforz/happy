@@ -24,6 +24,8 @@ export const MessageView = React.memo((props: {
   metadata: Metadata | null;
   sessionId: string;
   getMessageById?: (id: string) => Message | null;
+  onSendMessage?: (text: string) => void | Promise<void>;
+  parseDeviceCommands?: boolean;
 }) => {
   return (
     <View
@@ -35,6 +37,8 @@ export const MessageView = React.memo((props: {
           message={props.message}
           metadata={props.metadata}
           sessionId={props.sessionId}
+          parseDeviceCommands={props.parseDeviceCommands}
+          onSendMessage={props.onSendMessage}
           getMessageById={props.getMessageById}
         />
       </View>
@@ -48,6 +52,8 @@ function RenderBlock(props: {
   metadata: Metadata | null;
   sessionId: string;
   getMessageById?: (id: string) => Message | null;
+  onSendMessage?: (text: string) => void | Promise<void>;
+  parseDeviceCommands?: boolean;
 }): React.ReactElement {
   switch (props.message.kind) {
     case 'user-text':
@@ -56,11 +62,13 @@ function RenderBlock(props: {
           message={props.message}
           metadata={props.metadata}
           sessionId={props.sessionId}
+          parseDeviceCommands={props.parseDeviceCommands}
+          onSendMessage={props.onSendMessage}
         />
       );
 
     case 'agent-text':
-      return <AgentTextBlock message={props.message} sessionId={props.sessionId} />;
+      return <AgentTextBlock message={props.message} sessionId={props.sessionId} onSendMessage={props.onSendMessage} />;
 
     case 'tool-call':
       return <ToolCallBlock
@@ -171,10 +179,16 @@ function UserTextBlock(props: {
   message: UserTextMessage;
   metadata: Metadata | null;
   sessionId: string;
+  onSendMessage?: (text: string) => void | Promise<void>;
+  parseDeviceCommands?: boolean;
 }) {
   const handleOptionPress = React.useCallback((option: Option) => {
-    sync.sendMessage(props.sessionId, option.title, { source: 'option' });
-  }, [props.sessionId]);
+    if (props.onSendMessage) {
+      void props.onSendMessage(option.title);
+    } else {
+      sync.sendMessage(props.sessionId, option.title, { source: 'option' });
+    }
+  }, [props.sessionId, props.onSendMessage]);
 
   const userMessageBubbleColor = useSetting('userMessageBubbleColor');
   const { theme } = useUnistyles();
@@ -199,11 +213,14 @@ function UserTextBlock(props: {
   // echo there would drop the command with nothing to replace it. (Absent
   // flavor == Claude, matching the convention used elsewhere.)
   const isClaudeFlavor = !props.metadata?.flavor || props.metadata.flavor === 'claude';
-  if (isClaudeFlavor && isUserSlashCommandEcho(props.message.text, props.message.localId != null)) {
+  if (props.parseDeviceCommands !== false && isClaudeFlavor && isUserSlashCommandEcho(props.message.text, props.message.localId != null)) {
     return null;
   }
 
-  const parsed = parseLocalCommandMessage(props.message.displayText || props.message.text);
+  const displayText = props.message.displayText || props.message.text;
+  const parsed = props.parseDeviceCommands === false
+    ? { kind: 'text' as const, text: displayText }
+    : parseLocalCommandMessage(displayText);
   if (parsed.kind === 'caveat') {
     return null;
   }
@@ -259,10 +276,15 @@ function UserTextBlock(props: {
 function AgentTextBlock(props: {
   message: AgentTextMessage;
   sessionId: string;
+  onSendMessage?: (text: string) => void | Promise<void>;
 }) {
   const handleOptionPress = React.useCallback((option: Option) => {
-    sync.sendMessage(props.sessionId, option.title, { source: 'option' });
-  }, [props.sessionId]);
+    if (props.onSendMessage) {
+      void props.onSendMessage(option.title);
+    } else {
+      sync.sendMessage(props.sessionId, option.title, { source: 'option' });
+    }
+  }, [props.sessionId, props.onSendMessage]);
 
   // Hide thinking messages
   if (props.message.isThinking) {

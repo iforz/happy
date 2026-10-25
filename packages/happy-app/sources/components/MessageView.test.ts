@@ -33,6 +33,7 @@ vi.mock('./LongPressCopyable', async () => {
 });
 
 import { MessageView } from './MessageView';
+import { sync } from '@/sync/sync';
 
 const renderers: ReturnType<typeof create>[] = [];
 const base: UserTextMessage = {
@@ -143,5 +144,36 @@ describe('agent message copy button', () => {
 
     it('does not show on thinking rows', () => {
         expect(render({ ...agent, isThinking: true }).root.findAllByType('Pressable')).toHaveLength(0);
+    });
+});
+
+
+describe('account message options', () => {
+    it.each(['user-text', 'agent-text'] as const)('routes %s options through the account sender', (kind) => {
+        vi.mocked(sync.sendMessage).mockClear();
+        const onSendMessage = vi.fn();
+        let renderer!: ReturnType<typeof create>;
+        act(() => { renderer = create(React.createElement(MessageView, {
+            message: { ...base, kind }, sessionId: 'account-conversation', metadata: null, onSendMessage,
+        })); });
+        renderers.push(renderer);
+        act(() => renderer.root.findByType('MarkdownView').props.onOptionPress({ title: 'chosen option' }));
+        expect(onSendMessage).toHaveBeenCalledWith('chosen option');
+        expect(sync.sendMessage).not.toHaveBeenCalled();
+    });
+    it('keeps native device option sending as the default', () => {
+        vi.mocked(sync.sendMessage).mockClear();
+        const renderer = render({ ...base, kind: 'agent-text' });
+        act(() => renderer.root.findByType('MarkdownView').props.onOptionPress({ title: 'device option' }));
+        expect(sync.sendMessage).toHaveBeenCalledWith('session', 'device option', { source: 'option' });
+    });
+    it('preserves literal account text resembling a device command wrapper', () => {
+        const text = '<local-command-caveat>literal user prompt</local-command-caveat>';
+        let renderer!: ReturnType<typeof create>;
+        act(() => { renderer = create(React.createElement(MessageView, {
+            message: { ...base, text }, sessionId: 'account', metadata: null, parseDeviceCommands: false,
+        })); });
+        renderers.push(renderer);
+        expect(renderer.root.findByType('MarkdownView').props.markdown).toBe(text);
     });
 });

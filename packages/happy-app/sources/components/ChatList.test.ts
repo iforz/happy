@@ -94,8 +94,8 @@ vi.mock('@expo/vector-icons', async () => {
     };
 });
 vi.mock('@/sync/storage', () => ({
-    useSession: () => state.session,
-    useSessionMessages: () => ({ messages: state.messages, hasMoreOlder: state.hasMoreOlder, isLoadingOlder: state.isLoadingOlder }),
+    useSession: vi.fn(() => state.session),
+    useSessionMessages: vi.fn(() => ({ messages: state.messages, hasMoreOlder: state.hasMoreOlder, isLoadingOlder: state.isLoadingOlder })),
     useSetting: () => true,
 }));
 vi.mock('@/sync/storageTypes', () => ({}));
@@ -133,8 +133,9 @@ vi.mock('./ChatFooter', async () => {
     return { ChatFooter: (props: any) => ReactModule.createElement('ChatFooter', props) };
 });
 
-import { ChatList } from './ChatList';
+import { ChatList, AccountChatList } from './ChatList';
 import { sync } from '@/sync/sync';
+import { useSession, useSessionMessages } from '@/sync/storage';
 import { Modal } from '@/modal';
 import { EmptyMessages } from './EmptyMessages';
 
@@ -879,5 +880,24 @@ describe('ChatList work-group folding', () => {
         state.session = { ...state.session, id: 'other-session', metadata: { revision: 5 } };
         renderChat(renderer);
         expect(messageIds(renderer)).not.toContain('tool-earliest');
+    });
+});
+
+describe('account native list', () => {
+    it('renders native message rows without reading device storage, footer or history', () => {
+        vi.mocked(useSession).mockClear();
+        vi.mocked(useSessionMessages).mockClear();
+        let renderer!: ReturnType<typeof create>;
+        act(() => { renderer = create(React.createElement(AccountChatList, {
+            conversationId: 'account-conversation',
+            messages: [agentMessage('reply', 2), userMessage('prompt', 1)],
+            onSendMessage: vi.fn(),
+        })); });
+        renderers.push(renderer);
+        expect(messageIds(renderer)).toEqual(['reply', 'prompt']);
+        expect(useSession).not.toHaveBeenCalled();
+        expect(useSessionMessages).not.toHaveBeenCalled();
+        expect(renderer.root.findAllByType('ChatFooter')).toHaveLength(0);
+        expect(sync.loadOlderMessages).not.toHaveBeenCalled();
     });
 });
